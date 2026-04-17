@@ -24,7 +24,8 @@ namespace tf_namespace_bridge {
 
 namespace {
 
-const rclcpp::QoS kTfQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
+const rclcpp::QoS kTfSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
+const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
 }  // namespace
@@ -45,12 +46,12 @@ TfNamespaceBridge::TfNamespaceBridge(const rclcpp::NodeOptions& options)
 
   RCLCPP_INFO(get_logger(), "Bridging TF with frame prefix: '%s'", prefix_.c_str());
 
-  tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfQos);
+  tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
   tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
 
   // Relative topic names resolve to /<namespace>/tf and /<namespace>/tf_static
   tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
-      "tf", kTfQos, [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg); });
+      "tf", kTfSubQos, [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg); });
 
   tf_static_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
       "tf_static", kTfStaticQos,

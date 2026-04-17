@@ -26,7 +26,8 @@ namespace tf_namespace_bridge {
 
 namespace {
 
-const rclcpp::QoS kTfQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
+const rclcpp::QoS kTfSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
+const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
 }  // namespace
@@ -35,7 +36,7 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
     : Node("multi_tf_namespace_bridge", options) {
   declare_parameter<std::vector<std::string>>("namespaces", std::vector<std::string>{});
 
-  tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfQos);
+  tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
   tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
 
   param_cb_handle_ = add_on_set_parameters_callback(
@@ -71,7 +72,7 @@ void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>&
 
     auto& subs = subscriptions_[ns];
     subs.tf_sub = create_subscription<tf2_msgs::msg::TFMessage>(
-        "/" + ns + "/tf", kTfQos,
+        "/" + ns + "/tf", kTfSubQos,
         [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg, ns); });
 
     subs.tf_static_sub = create_subscription<tf2_msgs::msg::TFMessage>(
