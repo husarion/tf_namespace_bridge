@@ -1,8 +1,9 @@
+---
 launch:
 
   - arg:
       name: namespaces
-      default: "robot1,robot2"
+      default: robot1,robot2
       description: Comma-separated list of robot namespaces
 
   - node:

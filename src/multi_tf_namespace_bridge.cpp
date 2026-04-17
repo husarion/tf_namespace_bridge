@@ -43,7 +43,9 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
 
   const auto initial = get_parameter("namespaces").as_string_array();
   if (initial.empty()) {
-    RCLCPP_WARN(get_logger(), "No namespaces configured — node is idle. Set the 'namespaces' parameter to start bridging.");
+    RCLCPP_WARN(get_logger(),
+                "No namespaces configured — node is idle. Set the 'namespaces' parameter to start "
+                "bridging.");
   }
   UpdateSubscriptions(initial);
 }

@@ -39,8 +39,8 @@ TfNamespaceBridge::TfNamespaceBridge(const rclcpp::NodeOptions& options)
 
   if (prefix_.empty()) {
     throw std::invalid_argument(
-      "tf_namespace_bridge requires a non-root namespace (e.g. --ros-args -r __ns:=/robot1). "
-      "Running without a namespace would create a /tf feedback loop.");
+        "tf_namespace_bridge requires a non-root namespace (e.g. --ros-args -r __ns:=/robot1). "
+        "Running without a namespace would create a /tf feedback loop.");
   }
 
   RCLCPP_INFO(get_logger(), "Bridging TF with frame prefix: '%s'", prefix_.c_str());

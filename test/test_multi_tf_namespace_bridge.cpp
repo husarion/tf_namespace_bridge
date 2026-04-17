@@ -31,9 +31,9 @@ const rclcpp::QoS kTfQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
 tf2_msgs::msg::TFMessage MakeMessage(
-  const std::vector<std::pair<std::string, std::string>> & transforms) {
+    const std::vector<std::pair<std::string, std::string>>& transforms) {
   tf2_msgs::msg::TFMessage msg;
-  for (const auto & [parent, child] : transforms) {
+  for (const auto& [parent, child] : transforms) {
     geometry_msgs::msg::TransformStamped t;
     t.header.frame_id = parent;
     t.child_frame_id = child;
@@ -45,11 +45,10 @@ tf2_msgs::msg::TFMessage MakeMessage(
 }  // namespace
 
 class MultiTfNamespaceBridgeTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     rclcpp::NodeOptions opts;
-    opts.parameter_overrides(
-      {rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1"})});
+    opts.parameter_overrides({rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1"})});
     bridge_ = std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>(opts);
     test_node_ = rclcpp::Node::make_shared("test_node");
 
@@ -83,10 +82,10 @@ TEST_F(MultiTfNamespaceBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   bool got = false;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });  // let discovery settle
@@ -103,19 +102,19 @@ TEST_F(MultiTfNamespaceBridgeTest, PrefixesAllTransformsInMessage) {
   bool got = false;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });
   pub->publish(MakeMessage(
-    {{"base_link", "imu_link"}, {"base_link", "camera_link"}, {"base_link", "lidar_link"}}));
+      {{"base_link", "imu_link"}, {"base_link", "camera_link"}, {"base_link", "lidar_link"}}));
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; }));
   ASSERT_EQ(received.transforms.size(), 3u);
-  for (const auto & t : received.transforms) {
+  for (const auto& t : received.transforms) {
     EXPECT_EQ(t.header.frame_id, "robot1/base_link");
   }
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/imu_link");
@@ -128,16 +127,16 @@ TEST_F(MultiTfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   bool got = false;
 
   auto pub =
-    test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
   WaitFor(100ms, [] { return false; });
   pub->publish(MakeMessage({{"base_link", "cover_link"}}));
 
   // Subscribe after publish — transient_local must deliver the latched message
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf_static", kTfStaticQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf_static", kTfStaticQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; })) << "No message received on /tf_static";
   ASSERT_EQ(received.transforms.size(), 1u);
@@ -149,7 +148,7 @@ TEST_F(MultiTfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
   int count = 0;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr) { ++count; });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr) { ++count; });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });
@@ -164,13 +163,13 @@ TEST_F(MultiTfNamespaceBridgeTest, RuntimeAddNamespaceBridgesNewRobot) {
   bool got = false;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
 
   bridge_->set_parameter(
-    rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1", "robot2"}));
+      rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1", "robot2"}));
 
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot2/tf", kTfQos);
   WaitFor(100ms, [] { return false; });
@@ -186,15 +185,15 @@ TEST_F(MultiTfNamespaceBridgeTest, RuntimeRemoveNamespaceDestroysSubscription) {
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return pub->get_subscription_count() >= 1; }))
-    << "Bridge subscription not established";
+      << "Bridge subscription not established";
 
   bridge_->set_parameter(rclcpp::Parameter("namespaces", std::vector<std::string>{}));
 
   EXPECT_TRUE(WaitFor(1000ms, [&] { return pub->get_subscription_count() == 0; }))
-    << "Bridge subscription not removed after namespace was cleared";
+      << "Bridge subscription not removed after namespace was cleared";
 }
 
-int main(int argc, char ** argv) {
+int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   rclcpp::init(argc, argv);
   int result = RUN_ALL_TESTS();

@@ -32,9 +32,9 @@ const rclcpp::QoS kTfQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
 tf2_msgs::msg::TFMessage MakeMessage(
-  const std::vector<std::pair<std::string, std::string>> & transforms) {
+    const std::vector<std::pair<std::string, std::string>>& transforms) {
   tf2_msgs::msg::TFMessage msg;
-  for (const auto & [parent, child] : transforms) {
+  for (const auto& [parent, child] : transforms) {
     geometry_msgs::msg::TransformStamped t;
     t.header.frame_id = parent;
     t.child_frame_id = child;
@@ -46,8 +46,8 @@ tf2_msgs::msg::TFMessage MakeMessage(
 }  // namespace
 
 class TfNamespaceBridgeTest : public ::testing::Test {
-protected:
-  void SetUpWithNamespace(const std::string & ns) {
+ protected:
+  void SetUpWithNamespace(const std::string& ns) {
     rclcpp::NodeOptions opts;
     if (!ns.empty()) {
       opts.arguments({"--ros-args", "-r", "__ns:=/" + ns});
@@ -87,10 +87,10 @@ TEST_F(TfNamespaceBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   bool got = false;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });
@@ -109,19 +109,19 @@ TEST_F(TfNamespaceBridgeTest, PrefixesAllTransformsInMessage) {
   bool got = false;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });
   pub->publish(MakeMessage(
-    {{"base_link", "imu_link"}, {"base_link", "camera_link"}, {"base_link", "lidar_link"}}));
+      {{"base_link", "imu_link"}, {"base_link", "camera_link"}, {"base_link", "lidar_link"}}));
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; }));
   ASSERT_EQ(received.transforms.size(), 3u);
-  for (const auto & t : received.transforms) {
+  for (const auto& t : received.transforms) {
     EXPECT_EQ(t.header.frame_id, "robot1/base_link");
   }
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/imu_link");
@@ -136,16 +136,16 @@ TEST_F(TfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   bool got = false;
 
   auto pub =
-    test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
   WaitFor(100ms, [] { return false; });
   pub->publish(MakeMessage({{"base_link", "cover_link"}}));
 
   // Subscribe after publish — transient_local must deliver the latched message
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf_static", kTfStaticQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-      received = *msg;
-      got = true;
-    });
+      "/tf_static", kTfStaticQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; })) << "No message received on /tf_static";
   ASSERT_EQ(received.transforms.size(), 1u);
@@ -158,7 +158,7 @@ TEST_F(TfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
   int count = 0;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
-    "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr) { ++count; });
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr) { ++count; });
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
 
   WaitFor(100ms, [] { return false; });
@@ -174,7 +174,7 @@ TEST_F(TfNamespaceBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
   EXPECT_THROW(SetUpWithNamespace(""), std::invalid_argument);
 }
 
-int main(int argc, char ** argv) {
+int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   rclcpp::init(argc, argv);
   int result = RUN_ALL_TESTS();
