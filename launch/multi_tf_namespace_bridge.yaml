@@ -1,0 +1,14 @@
+launch:
+
+  - arg:
+      name: namespaces
+      default: "robot1,robot2"
+      description: Comma-separated list of robot namespaces
+
+  - node:
+      package: tf_namespace_bridge
+      executable: multi_tf_namespace_bridge
+      name: multi_tf_namespace_bridge
+      output: screen
+      parameters:
+        - namespaces: $(eval var('namespaces').split(','))

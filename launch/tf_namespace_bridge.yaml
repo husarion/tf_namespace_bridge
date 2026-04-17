@@ -1,0 +1,13 @@
+launch:
+
+  - arg:
+      name: namespace
+      default: robot1
+      description: Robot namespace — determines the source topics and frame prefix
+
+  - node:
+      package: tf_namespace_bridge
+      executable: tf_namespace_bridge
+      name: tf_namespace_bridge
+      namespace: $(var namespace)
+      output: screen
