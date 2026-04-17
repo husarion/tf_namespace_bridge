@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>tf_namespace_bridge</name>
+  <version>0.1.0</version>
+  <description>Bridge namespaced TF topics into the global TF tree for multi-robot setups</description>
+  <maintainer email="rafal.gorecki@husarion.com">Rafal Gorecki</maintainer>
+  <license>Apache License 2.0</license>
+
+  <url type="repository">https://github.com/husarion/tf_namespace_bridge</url>
+  <url type="bugtracker">https://github.com/husarion/tf_namespace_bridge/issues</url>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>tf2_msgs</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

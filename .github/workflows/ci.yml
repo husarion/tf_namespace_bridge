@@ -1,0 +1,56 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: pre-commit/action@v3.0.1
+
+  build-and-test:
+    name: build-and-test (jazzy)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ros_ws/src/tf_namespace_bridge
+
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+
+      - name: rosdep install
+        working-directory: ros_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          sudo apt-get update -q
+          rosdep update --rosdistro jazzy
+          rosdep install --from-paths src --ignore-src -y
+
+      - name: colcon build
+        working-directory: ros_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --packages-select tf_namespace_bridge \
+            --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+      - name: colcon test
+        working-directory: ros_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test --packages-select tf_namespace_bridge \
+            --event-handlers console_direct+
+          colcon test-result --verbose --all
