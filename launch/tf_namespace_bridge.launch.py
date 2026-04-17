@@ -31,8 +31,8 @@ def generate_launch_description():
             namespace_arg,
             Node(
                 package="tf_namespace_bridge",
-                executable="namespace_tf_bridge",
-                name="namespace_tf_bridge",
+                executable="tf_namespace_bridge",
+                name="tf_namespace_bridge",
                 namespace=LaunchConfiguration("namespace"),
                 output="screen",
             ),

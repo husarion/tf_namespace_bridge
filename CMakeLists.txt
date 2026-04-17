@@ -13,19 +13,19 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2_msgs REQUIRED)
 
-# multi_namespace_tf_bridge
-add_executable(multi_namespace_tf_bridge src/multi_namespace_tf_bridge.cpp
-                                         src/multi_namespace_tf_bridge_node.cpp)
-target_include_directories(multi_namespace_tf_bridge PRIVATE include)
-ament_target_dependencies(multi_namespace_tf_bridge rclcpp tf2_msgs)
+# multi_tf_namespace_bridge
+add_executable(multi_tf_namespace_bridge src/multi_tf_namespace_bridge.cpp
+                                         src/multi_tf_namespace_bridge_node.cpp)
+target_include_directories(multi_tf_namespace_bridge PRIVATE include)
+ament_target_dependencies(multi_tf_namespace_bridge rclcpp tf2_msgs)
 
-# namespace_tf_bridge
-add_executable(namespace_tf_bridge src/namespace_tf_bridge.cpp
-                                   src/namespace_tf_bridge_node.cpp)
-target_include_directories(namespace_tf_bridge PRIVATE include)
-ament_target_dependencies(namespace_tf_bridge rclcpp tf2_msgs)
+# tf_namespace_bridge
+add_executable(tf_namespace_bridge src/tf_namespace_bridge.cpp
+                                   src/tf_namespace_bridge_node.cpp)
+target_include_directories(tf_namespace_bridge PRIVATE include)
+ament_target_dependencies(tf_namespace_bridge rclcpp tf2_msgs)
 
-install(TARGETS multi_namespace_tf_bridge namespace_tf_bridge
+install(TARGETS multi_tf_namespace_bridge tf_namespace_bridge
         DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
@@ -33,16 +33,16 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(test_multi_namespace_tf_bridge
-                  test/test_multi_namespace_tf_bridge.cpp
-                  src/multi_namespace_tf_bridge.cpp)
-  target_include_directories(test_multi_namespace_tf_bridge PRIVATE include)
-  ament_target_dependencies(test_multi_namespace_tf_bridge rclcpp tf2_msgs)
+  ament_add_gtest(test_multi_tf_namespace_bridge
+                  test/test_multi_tf_namespace_bridge.cpp
+                  src/multi_tf_namespace_bridge.cpp)
+  target_include_directories(test_multi_tf_namespace_bridge PRIVATE include)
+  ament_target_dependencies(test_multi_tf_namespace_bridge rclcpp tf2_msgs)
 
-  ament_add_gtest(test_namespace_tf_bridge test/test_namespace_tf_bridge.cpp
-                  src/namespace_tf_bridge.cpp)
-  target_include_directories(test_namespace_tf_bridge PRIVATE include)
-  ament_target_dependencies(test_namespace_tf_bridge rclcpp tf2_msgs)
+  ament_add_gtest(test_tf_namespace_bridge test/test_tf_namespace_bridge.cpp
+                  src/tf_namespace_bridge.cpp)
+  target_include_directories(test_tf_namespace_bridge PRIVATE include)
+  ament_target_dependencies(test_tf_namespace_bridge rclcpp tf2_msgs)
 endif()
 
 ament_package()

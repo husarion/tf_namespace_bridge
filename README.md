@@ -11,7 +11,7 @@ When multiple robots publish transforms under their own namespaces (e.g. `/robot
 
 ## Nodes
 
-### `multi_namespace_tf_bridge`
+### `multi_tf_namespace_bridge`
 
 Aggregates TF from multiple robots into the global `/tf` and `/tf_static`.
 
@@ -40,19 +40,19 @@ The parameter can be updated at runtime — subscriptions are created for newly 
 **Usage:**
 
 ```bash
-ros2 run tf_namespace_bridge multi_namespace_tf_bridge \
+ros2 run tf_namespace_bridge multi_tf_namespace_bridge \
   --ros-args -p namespaces:="['robot1', 'robot2']"
 ```
 
 Runtime update:
 
 ```bash
-ros2 param set /multi_namespace_tf_bridge namespaces "['robot1', 'robot2', 'robot3']"
+ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"
 ```
 
 ---
 
-### `namespace_tf_bridge`
+### `tf_namespace_bridge`
 
 Lightweight single-robot bridge. Run inside a robot's namespace — it automatically bridges that robot's `/tf` and `/tf_static` to the global tree.
 
@@ -73,7 +73,7 @@ Lightweight single-robot bridge. Run inside a robot's namespace — it automatic
 **Usage:**
 
 ```bash
-ros2 run tf_namespace_bridge namespace_tf_bridge \
+ros2 run tf_namespace_bridge tf_namespace_bridge \
   --ros-args -r __ns:=/robot1
 ```
 

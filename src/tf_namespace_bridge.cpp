@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "tf_namespace_bridge/namespace_tf_bridge.hpp"
+#include "tf_namespace_bridge/tf_namespace_bridge.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -29,8 +29,8 @@ const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().tra
 
 }  // namespace
 
-NamespaceTfBridge::NamespaceTfBridge(const rclcpp::NodeOptions& options)
-    : Node("namespace_tf_bridge", options) {
+TfNamespaceBridge::TfNamespaceBridge(const rclcpp::NodeOptions& options)
+    : Node("tf_namespace_bridge", options) {
   // Derive frame prefix from node namespace: "/robot1" -> "robot1/"
   std::string ns = get_namespace();
   if (ns.size() > 1) {
@@ -39,7 +39,7 @@ NamespaceTfBridge::NamespaceTfBridge(const rclcpp::NodeOptions& options)
 
   if (prefix_.empty()) {
     throw std::invalid_argument(
-      "namespace_tf_bridge requires a non-root namespace (e.g. --ros-args -r __ns:=/robot1). "
+      "tf_namespace_bridge requires a non-root namespace (e.g. --ros-args -r __ns:=/robot1). "
       "Running without a namespace would create a /tf feedback loop.");
   }
 
@@ -57,15 +57,15 @@ NamespaceTfBridge::NamespaceTfBridge(const rclcpp::NodeOptions& options)
       [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg); });
 }
 
-void NamespaceTfBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+void TfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
   tf_pub_->publish(PrefixMessage(*msg));
 }
 
-void NamespaceTfBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+void TfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
   tf_static_pub_->publish(PrefixMessage(*msg));
 }
 
-tf2_msgs::msg::TFMessage NamespaceTfBridge::PrefixMessage(
+tf2_msgs::msg::TFMessage TfNamespaceBridge::PrefixMessage(
     const tf2_msgs::msg::TFMessage& msg) const {
   tf2_msgs::msg::TFMessage prefixed = msg;
   for (auto& transform : prefixed.transforms) {

@@ -22,8 +22,8 @@ def generate_launch_description():
         [
             Node(
                 package="tf_namespace_bridge",
-                executable="multi_namespace_tf_bridge",
-                name="multi_namespace_tf_bridge",
+                executable="multi_tf_namespace_bridge",
+                name="multi_tf_namespace_bridge",
                 parameters=[{"namespaces": ["robot1", "robot2"]}],
                 output="screen",
             )

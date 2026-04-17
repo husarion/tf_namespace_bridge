@@ -21,7 +21,7 @@
 #include "gtest/gtest.h"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
-#include "tf_namespace_bridge/multi_namespace_tf_bridge.hpp"
+#include "tf_namespace_bridge/multi_tf_namespace_bridge.hpp"
 
 using namespace std::chrono_literals;
 
@@ -44,13 +44,13 @@ tf2_msgs::msg::TFMessage MakeMessage(
 
 }  // namespace
 
-class MultiNamespaceTfBridgeTest : public ::testing::Test {
+class MultiTfNamespaceBridgeTest : public ::testing::Test {
 protected:
   void SetUp() override {
     rclcpp::NodeOptions opts;
     opts.parameter_overrides(
       {rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1"})});
-    bridge_ = std::make_shared<tf_namespace_bridge::MultiNamespaceTfBridge>(opts);
+    bridge_ = std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>(opts);
     test_node_ = rclcpp::Node::make_shared("test_node");
 
     executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -73,12 +73,12 @@ protected:
     return condition();
   }
 
-  std::shared_ptr<tf_namespace_bridge::MultiNamespaceTfBridge> bridge_;
+  std::shared_ptr<tf_namespace_bridge::MultiTfNamespaceBridge> bridge_;
   rclcpp::Node::SharedPtr test_node_;
   rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
 };
 
-TEST_F(MultiNamespaceTfBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
+TEST_F(MultiTfNamespaceBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   tf2_msgs::msg::TFMessage received;
   bool got = false;
 
@@ -98,7 +98,7 @@ TEST_F(MultiNamespaceTfBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/imu_link");
 }
 
-TEST_F(MultiNamespaceTfBridgeTest, PrefixesAllTransformsInMessage) {
+TEST_F(MultiTfNamespaceBridgeTest, PrefixesAllTransformsInMessage) {
   tf2_msgs::msg::TFMessage received;
   bool got = false;
 
@@ -123,7 +123,7 @@ TEST_F(MultiNamespaceTfBridgeTest, PrefixesAllTransformsInMessage) {
   EXPECT_EQ(received.transforms[2].child_frame_id, "robot1/lidar_link");
 }
 
-TEST_F(MultiNamespaceTfBridgeTest, PrefixesStaticTfFrames) {
+TEST_F(MultiTfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   tf2_msgs::msg::TFMessage received;
   bool got = false;
 
@@ -145,7 +145,7 @@ TEST_F(MultiNamespaceTfBridgeTest, PrefixesStaticTfFrames) {
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
 }
 
-TEST_F(MultiNamespaceTfBridgeTest, EmptyMessageDoesNotCrash) {
+TEST_F(MultiTfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
   int count = 0;
 
   auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
@@ -159,7 +159,7 @@ TEST_F(MultiNamespaceTfBridgeTest, EmptyMessageDoesNotCrash) {
   EXPECT_EQ(count, 1);
 }
 
-TEST_F(MultiNamespaceTfBridgeTest, RuntimeAddNamespaceBridgesNewRobot) {
+TEST_F(MultiTfNamespaceBridgeTest, RuntimeAddNamespaceBridgesNewRobot) {
   tf2_msgs::msg::TFMessage received;
   bool got = false;
 
@@ -180,7 +180,7 @@ TEST_F(MultiNamespaceTfBridgeTest, RuntimeAddNamespaceBridgesNewRobot) {
   EXPECT_EQ(received.transforms[0].header.frame_id, "robot2/base_link");
 }
 
-TEST_F(MultiNamespaceTfBridgeTest, RuntimeRemoveNamespaceDestroysSubscription) {
+TEST_F(MultiTfNamespaceBridgeTest, RuntimeRemoveNamespaceDestroysSubscription) {
   // Verify subscription teardown via publisher's subscriber count — more reliable than
   // checking message delivery because DDS connection teardown is asynchronous.
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);

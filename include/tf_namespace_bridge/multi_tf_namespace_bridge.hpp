@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef TF_NAMESPACE_BRIDGE__MULTI_NAMESPACE_TF_BRIDGE_HPP_
-#define TF_NAMESPACE_BRIDGE__MULTI_NAMESPACE_TF_BRIDGE_HPP_
+#ifndef TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
+#define TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 
 #include <string>
 #include <unordered_map>
@@ -25,9 +25,9 @@
 
 namespace tf_namespace_bridge {
 
-class MultiNamespaceTfBridge : public rclcpp::Node {
+class MultiTfNamespaceBridge : public rclcpp::Node {
  public:
-  explicit MultiNamespaceTfBridge(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+  explicit MultiTfNamespaceBridge(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
  private:
   struct NamespaceSubscriptions {
@@ -51,4 +51,4 @@ class MultiNamespaceTfBridge : public rclcpp::Node {
 
 }  // namespace tf_namespace_bridge
 
-#endif  // TF_NAMESPACE_BRIDGE__MULTI_NAMESPACE_TF_BRIDGE_HPP_
+#endif  // TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_

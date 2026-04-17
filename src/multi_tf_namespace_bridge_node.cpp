@@ -13,11 +13,11 @@
 // limitations under the License.
 
 #include "rclcpp/rclcpp.hpp"
-#include "tf_namespace_bridge/namespace_tf_bridge.hpp"
+#include "tf_namespace_bridge/multi_tf_namespace_bridge.hpp"
 
 int main(int argc, char** argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<tf_namespace_bridge::NamespaceTfBridge>());
+  rclcpp::spin(std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>());
   rclcpp::shutdown();
   return 0;
 }

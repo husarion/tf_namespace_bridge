@@ -22,7 +22,7 @@
 #include "gtest/gtest.h"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
-#include "tf_namespace_bridge/namespace_tf_bridge.hpp"
+#include "tf_namespace_bridge/tf_namespace_bridge.hpp"
 
 using namespace std::chrono_literals;
 
@@ -45,14 +45,14 @@ tf2_msgs::msg::TFMessage MakeMessage(
 
 }  // namespace
 
-class NamespaceTfBridgeTest : public ::testing::Test {
+class TfNamespaceBridgeTest : public ::testing::Test {
 protected:
   void SetUpWithNamespace(const std::string & ns) {
     rclcpp::NodeOptions opts;
     if (!ns.empty()) {
       opts.arguments({"--ros-args", "-r", "__ns:=/" + ns});
     }
-    bridge_ = std::make_shared<tf_namespace_bridge::NamespaceTfBridge>(opts);
+    bridge_ = std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts);
     test_node_ = rclcpp::Node::make_shared("test_node_ns");
 
     executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -75,12 +75,12 @@ protected:
     return condition();
   }
 
-  std::shared_ptr<tf_namespace_bridge::NamespaceTfBridge> bridge_;
+  std::shared_ptr<tf_namespace_bridge::TfNamespaceBridge> bridge_;
   rclcpp::Node::SharedPtr test_node_;
   rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
 };
 
-TEST_F(NamespaceTfBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
+TEST_F(TfNamespaceBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   SetUpWithNamespace("robot1");
 
   tf2_msgs::msg::TFMessage received;
@@ -102,7 +102,7 @@ TEST_F(NamespaceTfBridgeTest, PrefixesHeaderFrameIdAndChildFrameId) {
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/imu_link");
 }
 
-TEST_F(NamespaceTfBridgeTest, PrefixesAllTransformsInMessage) {
+TEST_F(TfNamespaceBridgeTest, PrefixesAllTransformsInMessage) {
   SetUpWithNamespace("robot1");
 
   tf2_msgs::msg::TFMessage received;
@@ -129,7 +129,7 @@ TEST_F(NamespaceTfBridgeTest, PrefixesAllTransformsInMessage) {
   EXPECT_EQ(received.transforms[2].child_frame_id, "robot1/lidar_link");
 }
 
-TEST_F(NamespaceTfBridgeTest, PrefixesStaticTfFrames) {
+TEST_F(TfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   SetUpWithNamespace("robot1");
 
   tf2_msgs::msg::TFMessage received;
@@ -153,7 +153,7 @@ TEST_F(NamespaceTfBridgeTest, PrefixesStaticTfFrames) {
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
 }
 
-TEST_F(NamespaceTfBridgeTest, EmptyMessageDoesNotCrash) {
+TEST_F(TfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
   SetUpWithNamespace("robot1");
   int count = 0;
 
@@ -168,7 +168,7 @@ TEST_F(NamespaceTfBridgeTest, EmptyMessageDoesNotCrash) {
   EXPECT_EQ(count, 1);
 }
 
-TEST_F(NamespaceTfBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
+TEST_F(TfNamespaceBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
   // Running without a namespace would subscribe and publish to /tf simultaneously,
   // creating an infinite feedback loop. The node must refuse to start.
   EXPECT_THROW(SetUpWithNamespace(""), std::invalid_argument);

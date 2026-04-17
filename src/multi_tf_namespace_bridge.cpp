@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "tf_namespace_bridge/multi_namespace_tf_bridge.hpp"
+#include "tf_namespace_bridge/multi_tf_namespace_bridge.hpp"
 
 #include <string>
 #include <unordered_set>
@@ -31,8 +31,8 @@ const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().tra
 
 }  // namespace
 
-MultiNamespaceTfBridge::MultiNamespaceTfBridge(const rclcpp::NodeOptions& options)
-    : Node("multi_namespace_tf_bridge", options) {
+MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& options)
+    : Node("multi_tf_namespace_bridge", options) {
   declare_parameter<std::vector<std::string>>("namespaces", std::vector<std::string>{});
 
   tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfQos);
@@ -48,7 +48,7 @@ MultiNamespaceTfBridge::MultiNamespaceTfBridge(const rclcpp::NodeOptions& option
   UpdateSubscriptions(initial);
 }
 
-void MultiNamespaceTfBridge::UpdateSubscriptions(const std::vector<std::string>& namespaces) {
+void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>& namespaces) {
   const std::unordered_set<std::string> new_ns_set(namespaces.begin(), namespaces.end());
 
   for (auto it = subscriptions_.begin(); it != subscriptions_.end();) {
@@ -78,7 +78,7 @@ void MultiNamespaceTfBridge::UpdateSubscriptions(const std::vector<std::string>&
   }
 }
 
-rcl_interfaces::msg::SetParametersResult MultiNamespaceTfBridge::OnSetParameters(
+rcl_interfaces::msg::SetParametersResult MultiTfNamespaceBridge::OnSetParameters(
     const std::vector<rclcpp::Parameter>& parameters) {
   for (const auto& param : parameters) {
     if (param.get_name() == "namespaces") {
@@ -91,17 +91,17 @@ rcl_interfaces::msg::SetParametersResult MultiNamespaceTfBridge::OnSetParameters
   return result;
 }
 
-void MultiNamespaceTfBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg,
+void MultiTfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg,
                                   const std::string& ns) {
   tf_pub_->publish(PrefixMessage(*msg, ns + "/"));
 }
 
-void MultiNamespaceTfBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg,
+void MultiTfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg,
                                         const std::string& ns) {
   tf_static_pub_->publish(PrefixMessage(*msg, ns + "/"));
 }
 
-tf2_msgs::msg::TFMessage MultiNamespaceTfBridge::PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
+tf2_msgs::msg::TFMessage MultiTfNamespaceBridge::PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
                                                                const std::string& prefix) const {
   tf2_msgs::msg::TFMessage prefixed = msg;
   for (auto& transform : prefixed.transforms) {

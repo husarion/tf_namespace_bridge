@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef TF_NAMESPACE_BRIDGE__NAMESPACE_TF_BRIDGE_HPP_
-#define TF_NAMESPACE_BRIDGE__NAMESPACE_TF_BRIDGE_HPP_
+#ifndef TF_NAMESPACE_BRIDGE__TF_NAMESPACE_BRIDGE_HPP_
+#define TF_NAMESPACE_BRIDGE__TF_NAMESPACE_BRIDGE_HPP_
 
 #include <string>
 
@@ -22,9 +22,9 @@
 
 namespace tf_namespace_bridge {
 
-class NamespaceTfBridge : public rclcpp::Node {
+class TfNamespaceBridge : public rclcpp::Node {
  public:
-  explicit NamespaceTfBridge(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+  explicit TfNamespaceBridge(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
  private:
   void OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg);
@@ -40,4 +40,4 @@ class NamespaceTfBridge : public rclcpp::Node {
 
 }  // namespace tf_namespace_bridge
 
-#endif  // TF_NAMESPACE_BRIDGE__NAMESPACE_TF_BRIDGE_HPP_
+#endif  // TF_NAMESPACE_BRIDGE__TF_NAMESPACE_BRIDGE_HPP_
