@@ -153,7 +153,11 @@ TEST_F(TfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
 }
 
-TEST_F(TfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
+TEST_F(TfNamespaceBridgeTest, EmptyMessageIsNotRepublished) {
+  // Bridge skips publishing when the post-filter message has no transforms,
+  // including the trivial case of an empty input. The contract here is twofold:
+  // the bridge does not crash on empty input, and it does not waste DDS
+  // bandwidth forwarding empty TFMessage frames.
   SetUpWithNamespace("robot1");
   int count = 0;
 
@@ -165,13 +169,92 @@ TEST_F(TfNamespaceBridgeTest, EmptyMessageDoesNotCrash) {
   pub->publish(tf2_msgs::msg::TFMessage{});
 
   WaitFor(300ms, [&] { return count > 0; });
-  EXPECT_EQ(count, 1);
+  EXPECT_EQ(count, 0);
 }
 
 TEST_F(TfNamespaceBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
   // Running without a namespace would subscribe and publish to /tf simultaneously,
   // creating an infinite feedback loop. The node must refuse to start.
   EXPECT_THROW(SetUpWithNamespace(""), std::invalid_argument);
+}
+
+// --- Frame filter integration ---
+
+class TfNamespaceBridgeFilteredTest : public ::testing::Test {
+ protected:
+  void SetUpWithFilter(const std::string& ns, const std::vector<std::string>& filters) {
+    rclcpp::NodeOptions opts;
+    opts.arguments({"--ros-args", "-r", "__ns:=/" + ns});
+    opts.parameter_overrides({rclcpp::Parameter("frame_filters", filters)});
+    bridge_ = std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts);
+    test_node_ = rclcpp::Node::make_shared("test_node_filtered");
+    executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+    executor_->add_node(bridge_);
+    executor_->add_node(test_node_);
+  }
+
+  void TearDown() override {
+    executor_.reset();
+    bridge_.reset();
+    test_node_.reset();
+  }
+
+  bool WaitFor(std::chrono::milliseconds timeout, std::function<bool()> condition) {
+    const auto end = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < end) {
+      executor_->spin_some(5ms);
+      if (condition()) return true;
+    }
+    return condition();
+  }
+
+  std::shared_ptr<tf_namespace_bridge::TfNamespaceBridge> bridge_;
+  rclcpp::Node::SharedPtr test_node_;
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+};
+
+TEST_F(TfNamespaceBridgeFilteredTest, FilterBlocksNonMatchingChild) {
+  SetUpWithFilter("robot1", {"base_link"});
+
+  tf2_msgs::msg::TFMessage received;
+  bool got = false;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
+  auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
+  WaitFor(100ms, [] { return false; });
+  pub->publish(MakeMessage({{"odom", "base_link"}, {"base_link", "imu_link"}}));
+
+  ASSERT_TRUE(WaitFor(500ms, [&] { return got; })) << "No filtered message on /tf";
+  ASSERT_EQ(received.transforms.size(), 1u);
+  EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/base_link");
+}
+
+TEST_F(TfNamespaceBridgeFilteredTest, GlobMatchesWildcardAndAutoIncludesParent) {
+  SetUpWithFilter("robot1", {"wheel*"});
+
+  tf2_msgs::msg::TFMessage received;
+  bool got = false;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf", kTfQos, [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+        received = *msg;
+        got = true;
+      });
+  auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf", kTfQos);
+  WaitFor(100ms, [] { return false; });
+  // odom→base_link must be in the same message so the auto-included parent's
+  // own transform appears in the output (otherwise base_link would be flagged
+  // for auto-include but its inbound edge is not in this message).
+  pub->publish(
+      MakeMessage({{"odom", "base_link"}, {"base_link", "wheel_fl"}, {"base_link", "imu_link"}}));
+
+  ASSERT_TRUE(WaitFor(500ms, [&] { return got; }));
+  // wheel_fl matches, imu_link rejected, base_link auto-included.
+  ASSERT_EQ(received.transforms.size(), 2u);
+  EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/base_link");
+  EXPECT_EQ(received.transforms[1].child_frame_id, "robot1/wheel_fl");
 }
 
 int main(int argc, char** argv) {

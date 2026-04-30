@@ -6,9 +6,18 @@ launch:
       default: robot1
       description: Robot namespace — determines the source topics and frame prefix
 
+  - arg:
+      name: frame_filters
+      default: ''
+      description: >
+        Comma-separated glob patterns matched against child_frame_id.
+        Empty = pass-through. Example: 'odom,base_link,wheel*'.
+
   - node:
       package: tf_namespace_bridge
       executable: tf_namespace_bridge
       name: tf_namespace_bridge
       namespace: $(var namespace)
       output: screen
+      parameters:
+        - frame_filters: $(eval [s for s in var('frame_filters').split(',') if s])

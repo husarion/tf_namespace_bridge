@@ -31,6 +31,17 @@ const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
 constexpr auto kParamPollPeriod = std::chrono::milliseconds(200);
+constexpr auto kSummaryPollPeriod = std::chrono::milliseconds(500);
+constexpr auto kSummaryDebounce = std::chrono::seconds(3);
+
+std::string Join(const std::vector<std::string>& items, const std::string& sep) {
+  std::string out;
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i > 0) out += sep;
+    out += items[i];
+  }
+  return out;
+}
 
 }  // namespace
 
@@ -39,6 +50,21 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
   param_listener_ =
       std::make_shared<multi_tf_namespace_bridge::ParamListener>(get_node_parameters_interface());
   params_ = param_listener_->get_params();
+
+  // Validate frame_filters once up-front so we know whether to keep an empty
+  // applied set or accept the configured patterns.
+  FrameFilter probe;
+  if (probe.SetPatterns(params_.frame_filters)) {
+    applied_filters_ = params_.frame_filters;
+  } else {
+    RCLCPP_ERROR(get_logger(),
+                 "Invalid glob pattern(s) in frame_filters at startup; running with no filter "
+                 "(pass-through).");
+  }
+
+  if (!applied_filters_.empty()) {
+    RCLCPP_INFO(get_logger(), "Active frame_filters: [%s]", Join(applied_filters_, ", ").c_str());
+  }
 
   tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
   tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
@@ -51,39 +77,78 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
   UpdateSubscriptions(params_.namespaces);
 
   param_poll_timer_ = create_wall_timer(kParamPollPeriod, [this]() { OnParamPoll(); });
+  summary_timer_ = create_wall_timer(kSummaryPollPeriod, [this]() { OnSummaryPoll(); });
 }
 
 void MultiTfNamespaceBridge::OnParamPoll() {
   if (!param_listener_->is_old(params_)) return;
-  params_ = param_listener_->get_params();
-  UpdateSubscriptions(params_.namespaces);
+  auto new_params = param_listener_->get_params();
+
+  if (new_params.frame_filters != applied_filters_) {
+    FrameFilter probe;
+    if (probe.SetPatterns(new_params.frame_filters)) {
+      for (auto& [ns, state] : namespaces_) {
+        state.filter.SetPatterns(new_params.frame_filters);
+        state.summary_pending = false;
+      }
+      applied_filters_ = new_params.frame_filters;
+      RCLCPP_INFO(get_logger(), "Applied new frame_filters: [%s]",
+                  Join(applied_filters_, ", ").c_str());
+    } else {
+      RCLCPP_ERROR(get_logger(),
+                   "Invalid glob pattern(s) in frame_filters; keeping previous filter [%s]",
+                   Join(applied_filters_, ", ").c_str());
+    }
+  }
+
+  params_ = new_params;
+  UpdateSubscriptions(new_params.namespaces);
+}
+
+void MultiTfNamespaceBridge::OnSummaryPoll() {
+  const auto now = std::chrono::steady_clock::now();
+  for (auto& [ns, state] : namespaces_) {
+    if (!state.summary_pending) continue;
+    if (now - state.last_auto_include_change < kSummaryDebounce) continue;
+
+    const auto frames = state.filter.AutoIncludedFrames();
+    if (!frames.empty()) {
+      RCLCPP_WARN(get_logger(),
+                  "[%s] Auto-included %zu parent frame(s) to keep TF tree connected: [%s]. "
+                  "Add them to 'frame_filters' to silence this warning.",
+                  ns.c_str(), frames.size(), Join(frames, ", ").c_str());
+    }
+    state.summary_pending = false;
+  }
 }
 
 void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>& namespaces) {
   const std::unordered_set<std::string> new_ns_set(namespaces.begin(), namespaces.end());
 
-  for (auto it = subscriptions_.begin(); it != subscriptions_.end();) {
+  for (auto it = namespaces_.begin(); it != namespaces_.end();) {
     if (new_ns_set.find(it->first) == new_ns_set.end()) {
       RCLCPP_INFO(get_logger(), "Removing bridge for namespace: '%s'", it->first.c_str());
-      it = subscriptions_.erase(it);
+      it = namespaces_.erase(it);
     } else {
       ++it;
     }
   }
 
   for (const auto& ns : namespaces) {
-    if (subscriptions_.count(ns) > 0) {
+    if (namespaces_.count(ns) > 0) {
       continue;
     }
 
     RCLCPP_INFO(get_logger(), "Adding bridge for namespace: '%s'", ns.c_str());
 
-    auto& subs = subscriptions_[ns];
-    subs.tf_sub = create_subscription<tf2_msgs::msg::TFMessage>(
+    auto& state = namespaces_[ns];
+    state.filter.SetPatterns(applied_filters_);  // applied_filters_ is pre-validated
+
+    state.tf_sub = create_subscription<tf2_msgs::msg::TFMessage>(
         "/" + ns + "/tf", kTfSubQos,
         [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg, ns); });
 
-    subs.tf_static_sub = create_subscription<tf2_msgs::msg::TFMessage>(
+    state.tf_static_sub = create_subscription<tf2_msgs::msg::TFMessage>(
         "/" + ns + "/tf_static", kTfStaticQos,
         [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg, ns); });
   }
@@ -91,12 +156,34 @@ void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>&
 
 void MultiTfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg,
                                   const std::string& ns) {
-  tf_pub_->publish(PrefixMessage(*msg, ns + "/"));
+  auto it = namespaces_.find(ns);
+  if (it == namespaces_.end()) return;
+  ProcessAndPublish(it->second, ns, *msg, tf_pub_);
 }
 
 void MultiTfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg,
                                         const std::string& ns) {
-  tf_static_pub_->publish(PrefixMessage(*msg, ns + "/"));
+  auto it = namespaces_.find(ns);
+  if (it == namespaces_.end()) return;
+  ProcessAndPublish(it->second, ns, *msg, tf_static_pub_);
+}
+
+void MultiTfNamespaceBridge::ProcessAndPublish(
+    NamespaceState& state, const std::string& ns, const tf2_msgs::msg::TFMessage& msg,
+    const rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr& publisher) {
+  auto result = state.filter.Apply(msg);
+
+  for (const auto& f : result.newly_auto_included) {
+    RCLCPP_INFO(get_logger(), "[%s] Frame '%s' is parent of a bridged frame; auto-included",
+                ns.c_str(), f.c_str());
+  }
+  if (!result.newly_auto_included.empty()) {
+    state.last_auto_include_change = std::chrono::steady_clock::now();
+    state.summary_pending = true;
+  }
+
+  if (result.out_msg.transforms.empty()) return;
+  publisher->publish(PrefixMessage(result.out_msg, ns + "/"));
 }
 
 tf2_msgs::msg::TFMessage MultiTfNamespaceBridge::PrefixMessage(const tf2_msgs::msg::TFMessage& msg,

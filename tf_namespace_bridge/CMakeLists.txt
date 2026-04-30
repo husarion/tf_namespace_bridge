@@ -14,9 +14,11 @@ find_package(generate_parameter_library REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2_msgs REQUIRED)
 
-# Generated parameter library for multi_tf_namespace_bridge
+# Generated parameter libraries
 generate_parameter_library(multi_tf_namespace_bridge_parameters
                            src/multi_tf_namespace_bridge_parameters.yaml)
+generate_parameter_library(tf_namespace_bridge_parameters
+                           src/tf_namespace_bridge_parameters.yaml)
 
 # Internal helper: glob-based frame whitelist with auto-include of missing
 # parents.
@@ -28,7 +30,7 @@ ament_target_dependencies(frame_filter tf2_msgs)
 add_executable(multi_tf_namespace_bridge src/multi_tf_namespace_bridge.cpp
                                          src/multi_tf_namespace_bridge_node.cpp)
 target_include_directories(multi_tf_namespace_bridge PRIVATE include)
-target_link_libraries(multi_tf_namespace_bridge
+target_link_libraries(multi_tf_namespace_bridge frame_filter
                       multi_tf_namespace_bridge_parameters)
 ament_target_dependencies(multi_tf_namespace_bridge rclcpp tf2_msgs)
 
@@ -36,6 +38,8 @@ ament_target_dependencies(multi_tf_namespace_bridge rclcpp tf2_msgs)
 add_executable(tf_namespace_bridge src/tf_namespace_bridge.cpp
                                    src/tf_namespace_bridge_node.cpp)
 target_include_directories(tf_namespace_bridge PRIVATE include)
+target_link_libraries(tf_namespace_bridge frame_filter
+                      tf_namespace_bridge_parameters)
 ament_target_dependencies(tf_namespace_bridge rclcpp tf2_msgs)
 
 install(TARGETS multi_tf_namespace_bridge tf_namespace_bridge
@@ -55,13 +59,15 @@ if(BUILD_TESTING)
     test_multi_tf_namespace_bridge test/test_multi_tf_namespace_bridge.cpp
     src/multi_tf_namespace_bridge.cpp ENV ${TEST_ENV})
   target_include_directories(test_multi_tf_namespace_bridge PRIVATE include)
-  target_link_libraries(test_multi_tf_namespace_bridge
+  target_link_libraries(test_multi_tf_namespace_bridge frame_filter
                         multi_tf_namespace_bridge_parameters)
   ament_target_dependencies(test_multi_tf_namespace_bridge rclcpp tf2_msgs)
 
   ament_add_gtest(test_tf_namespace_bridge test/test_tf_namespace_bridge.cpp
                   src/tf_namespace_bridge.cpp ENV ${TEST_ENV})
   target_include_directories(test_tf_namespace_bridge PRIVATE include)
+  target_link_libraries(test_tf_namespace_bridge frame_filter
+                        tf_namespace_bridge_parameters)
   ament_target_dependencies(test_tf_namespace_bridge rclcpp tf2_msgs)
 
   ament_add_gtest(test_frame_filter test/test_frame_filter.cpp)

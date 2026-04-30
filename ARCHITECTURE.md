@@ -196,18 +196,98 @@ Both test files share the same pattern: `rclcpp::executors::SingleThreadedExecut
 
 ---
 
-## 7. Environment assumptions
+## 7. Frame filtering: glob whitelist + auto-include of parents
+
+The `frame_filters` parameter (a `string_array` of glob patterns) acts as a whitelist applied to the `child_frame_id` of every transform passing through the bridge. Empty list disables filtering — the bridge becomes a pure pass-through, identical to its pre-filter behavior.
+
+### 7.1. Why match on `child_frame_id` only
+
+In TF, every frame appears as a child exactly once (single-parent invariant). Filtering on `child_frame_id` therefore becomes "list every frame you want to see in the global tree." Filtering on both ends, or on either end, was considered and rejected — see commit history and the spec discussion in `frame_filter.hpp`'s docs:
+
+- **both:** easy to drop entire subtrees by forgetting an internal frame.
+- **either:** sneaks frames through whose parent matches but the user did not intend.
+
+### 7.2. Glob syntax
+
+Implemented in `frame_filter.cpp::GlobToRegex`:
+
+| Glob | Compiled to |
+|---|---|
+| `*` | `.*` |
+| `?` | `.` |
+| `.`, `+`, `(`, `)`, `[`, `]`, `{`, `}`, `^`, `$`, `\`, `\|` | escaped (literal) |
+| any other | literal |
+
+Patterns are anchored (`^…$`) — full-string match, no substring matches. Empty patterns are rejected by `SetPatterns` (returns false).
+
+### 7.3. Auto-include of parents
+
+If a matched frame's parent is not in the filter, the parent is auto-included so the global tree remains connected. Walk-up is bounded (`kMaxParentWalkDepth = 64`) and self-loop guarded for pathological inputs.
+
+The bridge logs:
+
+- `INFO` once per auto-included frame (caller iterates `ApplyResult::newly_auto_included`),
+- a debounced `WARN` summary 3 s after the auto-include set stops growing — listing all frames so the user can extend `frame_filters` and silence the warnings.
+
+Debounce avoids burst warnings during boot transient (URDF dump → /tf static + dynamic /tf arrive within ~1 s).
+
+### 7.4. Three-phase Apply
+
+`FrameFilter::Apply(msg)` runs three passes over a single `TFMessage` to make filtering robust to in-message ordering:
+
+1. **Phase 1 — graph update.** `parent_of_[t.child] = t.parent` for every transform.
+2. **Phase 2 — walk-up to populate auto_include_.** For every transform whose child is matched or already auto-included, walk up its parent chain via `parent_of_` until hitting a frame that matches the filter. Add each non-matched ancestor to `auto_include_`.
+3. **Phase 3 — emit.** Iterate transforms again; emit those whose child is matched or in `auto_include_`.
+
+The 3-pass structure handles the case where a single message contains both `odom→base_link` and `base_link→wheel_fl` with filter `["wheel*"]`: phase 1 builds the graph, phase 2 promotes `base_link` (via the wheel match) to the auto-include set, phase 3 then emits both edges. A single-pass loop would miss `odom→base_link` if it appeared first.
+
+### 7.5. State preservation across messages
+
+`FrameFilter` is stateful per namespace (multi-bridge holds one per namespace). The state survives across messages so that:
+
+- A wheel transform arriving in `/tf_static` adds `base_link` to `auto_include_`. When `odom→base_link` later arrives in `/tf`, the bridge sees `child=base_link ∈ auto_include_` and emits it. Result: the bridged subtree converges to a connected graph after a few message ticks.
+
+`SetPatterns` clears `match_cache_` and `auto_include_` (both pattern-dependent) but preserves `parent_of_` (pattern-agnostic graph). `Reset` clears everything.
+
+### 7.6. Performance
+
+`std::regex` is slow in `libstdc++`; we wrap it in `match_cache_` keyed by frame name. After cache warm-up (one full URDF dump), every subsequent transform check is one hash lookup. Per-message overhead vs the unfiltered baseline is ~30–50% on synthetic micro-benchmarks but stays in microseconds — DDS serialization dominates. Memory cost: ~10–15 KB per namespace.
+
+### 7.7. Symmetry: `/tf` and `/tf_static`
+
+Filter applies to both topics with the same glob set and shares the auto-include state. Filtering only one would yield a partially connected bridged tree. Test `FilterAppliesToTfStatic` (multi) guards the static path.
+
+### 7.8. Empty post-filter messages
+
+The bridge skips publishing when the post-filter message has no transforms — saves DDS bandwidth on every namespace whose filter rejects everything in a given tick. If you ever need to forward empty heartbeats, this is the place to change.
+
+### 7.9. Reactivity to parameter changes
+
+`generate_parameter_library` does the storage and validation; the bridge polls `param_listener_->is_old(params_)` every 200 ms (constant `kParamPollPeriod`) and applies changes:
+
+- `namespaces` change → `UpdateSubscriptions` adds/removes per-namespace state.
+- `frame_filters` change → validate via a probe `FrameFilter::SetPatterns`; if valid, propagate to every per-namespace filter and reset `summary_pending`. If invalid (e.g. an empty pattern), log `ERROR` and keep the previously applied filter.
+
+Trade-off: 0–200 ms latency on parameter reaction. Reactive `add_on_set_parameters_callback` was rejected to avoid mixing two parameter mechanisms; the latency is acceptable for fleet reconfiguration.
+
+---
+
+## 8. Environment assumptions
 
 - **ROS 2 Jazzy** — see `package.xml`, `ci.yml`, `.vscode/settings.json`. CI runs on `ubuntu-24.04`. Not tested on Humble; the `rclcpp::QoS` builder API should be compatible, but `transient_local` semantics have only been verified on Jazzy.
 - **C++17** required (CMakeLists sets it if not defined).
 - **The package is pure C++**, no Python components (even though pre-commit has flake8/black/isort wired up for the future).
+- **Tests run with `ROS_DOMAIN_ID=89` and `ROS_LOCALHOST_ONLY=1`** so a sibling package or a real robot publishing on the default domain cannot pollute `/tf` during integration tests. Set in `CMakeLists.txt` via `ament_add_gtest(... ENV ${TEST_ENV})`.
 
 ---
 
-## 8. Roadmap / debt / "what next"
+## 9. Roadmap / debt / "what next"
 
 (Update this section on every important decision.)
 
-- [ ] None — the package is in a stable state.
+- [x] Migrate parameters to `generate_parameter_library` — commit `5531e0f`.
+- [x] Add `FrameFilter` helper with glob whitelist + parent auto-include — commit `9fa1f39`.
+- [x] Integrate `frame_filters` parameter end-to-end in both bridges — commit (this).
+- [ ] Promote `frame_filters` glob validation into a custom `generate_parameter_library` validator so invalid patterns are rejected at the rclcpp layer rather than via runtime ERROR log.
 
 When a new feature lands, add a short check-off here with the commit that delivered it, so it's easy to trace *why* a design decision changed later.

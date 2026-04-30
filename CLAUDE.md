@@ -8,6 +8,8 @@ Practical guide for working in this repo for Claude Code. When we add a new feat
 
 - **What it is:** ROS 2 (Jazzy, C++17) package that bridges TF from per-robot namespaces (`/<ns>/tf`, `/<ns>/tf_static`) into the global `/tf`, `/tf_static` with prefixed frame names (`base_link → robot1/base_link`).
 - **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter).
+- **Parameters:** generated via [`generate_parameter_library`](https://github.com/PickNikRobotics/generate_parameter_library) (YAML schemas in `src/*_parameters.yaml`). `namespaces` (multi only) and `frame_filters` (both) are runtime-updatable through a 200 ms ParamListener poll.
+- **`frame_filters`** is a glob whitelist on `child_frame_id` with auto-include of missing parents — see [Frame filtering](ARCHITECTURE.md#9-frame-filtering-glob-whitelist--auto-include-of-parents) in ARCHITECTURE.md.
 - **Workspace:** `~/Husarion/Workspaces/rosbot_ws` (sibling packages: `rosbot_ros`, `husarion_*`, `micro-ROS-Agent`).
 - **Branches:** `main` (stable), `jazzy` (active — work happens here). **Never commit directly to `main`.**
 
@@ -25,23 +27,28 @@ tf_namespace_bridge/                       # repo root
 ├── .pre-commit-config.yaml                # see "Pre-commit" below
 ├── .markdownlint.yaml                     # MD013 disabled
 ├── .github/workflows/ci.yml               # pre-commit + build-and-test
-└── tf_namespace_bridge/                   # ament_cmake package (nested — see commit 249249a)
+└── tf_namespace_bridge/                              # ament_cmake package (nested — see commit 249249a)
     ├── CMakeLists.txt
     ├── package.xml
     ├── include/tf_namespace_bridge/
     │   ├── tf_namespace_bridge.hpp
-    │   └── multi_tf_namespace_bridge.hpp
+    │   ├── multi_tf_namespace_bridge.hpp
+    │   └── frame_filter.hpp                          # glob whitelist + auto-include logic
     ├── src/
-    │   ├── tf_namespace_bridge.cpp        # class implementation
-    │   ├── tf_namespace_bridge_node.cpp   # main()
+    │   ├── tf_namespace_bridge.cpp                   # class implementation
+    │   ├── tf_namespace_bridge_node.cpp              # main()
+    │   ├── tf_namespace_bridge_parameters.yaml      # generate_parameter_library schema
     │   ├── multi_tf_namespace_bridge.cpp
-    │   └── multi_tf_namespace_bridge_node.cpp
+    │   ├── multi_tf_namespace_bridge_node.cpp
+    │   ├── multi_tf_namespace_bridge_parameters.yaml
+    │   └── frame_filter.cpp
     ├── launch/
     │   ├── tf_namespace_bridge.yaml
     │   └── multi_tf_namespace_bridge.yaml
     └── test/
         ├── test_tf_namespace_bridge.cpp
-        └── test_multi_tf_namespace_bridge.cpp
+        ├── test_multi_tf_namespace_bridge.cpp
+        └── test_frame_filter.cpp                     # unit tests, no rclcpp deps
 ```
 
 **Note on nesting:** the repo is `tf_namespace_bridge/`, but the ROS package lives in `tf_namespace_bridge/tf_namespace_bridge/`. This was decided in commit `249249a` ("Move all ROS files into one folder"). `colcon` finds it automatically, but when editing `CMakeLists.txt` or `package.xml` keep the two-level path in mind.
@@ -192,6 +199,9 @@ These things are easy to break — verify them in every PR:
 4. **Runtime updates of the `namespaces` parameter** in `MultiTfNamespaceBridge`: removed namespaces must clear their subscriptions (test `RuntimeRemoveNamespaceDestroysSubscription` uses `get_subscription_count()` — DDS teardown is asynchronous, which is why we don't test "no message arrives").
 5. **Frame prefix ends with a slash** (`robot1/`), not an underscore. This is the TF convention: `<ns>/<frame>`.
 6. **Every transform in a message gets prefixed — both `header.frame_id` and `child_frame_id`.** Easy to forget one; test `PrefixesAllTransformsInMessage` catches this.
+7. **Frame filter applies symmetrically to `/tf` and `/tf_static`.** Filtering only one would leave the bridged tree partially connected. Test `FilterAppliesToTfStatic` guards the static path.
+8. **Empty post-filter messages are not republished** (intentional — saves DDS bandwidth). If you ever change this, update `EmptyMessageIsNotRepublished` tests.
+9. **Tests run in isolated `ROS_DOMAIN_ID=89` with `ROS_LOCALHOST_ONLY=1`.** Necessary because sibling packages in the workspace (`rosbot_ros`) may publish on the default domain and pollute `/tf` during integration tests. See `feedback_test_isolation_ros_domain` in memory.
 
 ---
 
@@ -201,8 +211,9 @@ These things are easy to break — verify them in every PR:
 |---|---|
 | How does the single bridge work? | [src/tf_namespace_bridge.cpp](tf_namespace_bridge/src/tf_namespace_bridge.cpp) |
 | Multi + dynamic namespaces? | [src/multi_tf_namespace_bridge.cpp](tf_namespace_bridge/src/multi_tf_namespace_bridge.cpp) |
-| QoS constants | top of both `*.cpp` files (anonymous namespace) |
-| Which parameters are declared? | `MultiTfNamespaceBridge` constructor (`declare_parameter<...>("namespaces", ...)`) |
+| Frame filter (glob + auto-include) | [src/frame_filter.cpp](tf_namespace_bridge/src/frame_filter.cpp), [include/tf_namespace_bridge/frame_filter.hpp](tf_namespace_bridge/include/tf_namespace_bridge/frame_filter.hpp) |
+| QoS constants | top of both bridge `*.cpp` files (anonymous namespace) |
+| Which parameters are declared? | YAML schemas in `src/*_parameters.yaml` (consumed by `generate_parameter_library`) |
 | Launch file format | [launch/*.yaml](tf_namespace_bridge/launch/) (YAML, not Python — since commit `004ca7a`) |
 | CI requirements | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 | Hook list | [.pre-commit-config.yaml](.pre-commit-config.yaml) |

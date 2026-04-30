@@ -15,6 +15,7 @@
 #ifndef TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 #define TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -22,6 +23,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
+#include "tf_namespace_bridge/frame_filter.hpp"
 #include "tf_namespace_bridge/multi_tf_namespace_bridge_parameters.hpp"
 
 namespace tf_namespace_bridge {
@@ -31,22 +33,31 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
   explicit MultiTfNamespaceBridge(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
  private:
-  struct NamespaceSubscriptions {
+  struct NamespaceState {
     rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub;
     rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_sub;
+    FrameFilter filter;
+    std::chrono::steady_clock::time_point last_auto_include_change;
+    bool summary_pending = false;
   };
 
   void UpdateSubscriptions(const std::vector<std::string>& namespaces);
   void OnParamPoll();
+  void OnSummaryPoll();
   void OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg, const std::string& ns);
   void OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg, const std::string& ns);
+  void ProcessAndPublish(NamespaceState& state, const std::string& ns,
+                         const tf2_msgs::msg::TFMessage& msg,
+                         const rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr& publisher);
   tf2_msgs::msg::TFMessage PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
                                          const std::string& prefix) const;
 
   std::shared_ptr<multi_tf_namespace_bridge::ParamListener> param_listener_;
   multi_tf_namespace_bridge::Params params_;
   rclcpp::TimerBase::SharedPtr param_poll_timer_;
-  std::unordered_map<std::string, NamespaceSubscriptions> subscriptions_;
+  rclcpp::TimerBase::SharedPtr summary_timer_;
+  std::vector<std::string> applied_filters_;
+  std::unordered_map<std::string, NamespaceState> namespaces_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_pub_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_pub_;
 };

@@ -6,6 +6,13 @@ launch:
       default: robot1,robot2
       description: Comma-separated list of robot namespaces
 
+  - arg:
+      name: frame_filters
+      default: ''
+      description: >
+        Comma-separated glob patterns matched against child_frame_id.
+        Empty = pass-through. Example: 'odom,base_link,wheel*'.
+
   - node:
       package: tf_namespace_bridge
       executable: multi_tf_namespace_bridge
@@ -13,3 +20,4 @@ launch:
       output: screen
       parameters:
         - namespaces: $(eval var('namespaces').split(','))
+        - frame_filters: $(eval [s for s in var('frame_filters').split(',') if s])
