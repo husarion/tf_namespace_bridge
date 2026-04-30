@@ -172,7 +172,10 @@ TEST_F(MultiTfNamespaceBridgeTest, RuntimeAddNamespaceBridgesNewRobot) {
       rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1", "robot2"}));
 
   auto pub = test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot2/tf", kTfQos);
-  WaitFor(100ms, [] { return false; });
+  // ParamListener is polled every 200ms; wait for the bridge subscription to come up
+  // before publishing — best_effort QoS does not buffer messages for late subscribers.
+  ASSERT_TRUE(WaitFor(1000ms, [&] { return pub->get_subscription_count() > 0; }))
+      << "Bridge did not subscribe after adding robot2";
   pub->publish(MakeMessage({{"base_link", "imu_link"}}));
 
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; })) << "No message after adding robot2";
@@ -189,7 +192,8 @@ TEST_F(MultiTfNamespaceBridgeTest, RuntimeRemoveNamespaceDestroysSubscription) {
 
   bridge_->set_parameter(rclcpp::Parameter("namespaces", std::vector<std::string>{}));
 
-  EXPECT_TRUE(WaitFor(1000ms, [&] { return pub->get_subscription_count() == 0; }))
+  // ParamListener is polled every 200ms; allow extra margin on top of DDS teardown.
+  EXPECT_TRUE(WaitFor(1500ms, [&] { return pub->get_subscription_count() == 0; }))
       << "Bridge subscription not removed after namespace was cleared";
 }
 

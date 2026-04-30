@@ -15,13 +15,14 @@
 #ifndef TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 #define TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
+#include "tf_namespace_bridge/multi_tf_namespace_bridge_parameters.hpp"
 
 namespace tf_namespace_bridge {
 
@@ -36,17 +37,18 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
   };
 
   void UpdateSubscriptions(const std::vector<std::string>& namespaces);
-  rcl_interfaces::msg::SetParametersResult OnSetParameters(
-      const std::vector<rclcpp::Parameter>& parameters);
+  void OnParamPoll();
   void OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg, const std::string& ns);
   void OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg, const std::string& ns);
   tf2_msgs::msg::TFMessage PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
                                          const std::string& prefix) const;
 
+  std::shared_ptr<multi_tf_namespace_bridge::ParamListener> param_listener_;
+  multi_tf_namespace_bridge::Params params_;
+  rclcpp::TimerBase::SharedPtr param_poll_timer_;
   std::unordered_map<std::string, NamespaceSubscriptions> subscriptions_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_pub_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_pub_;
-  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };
 
 }  // namespace tf_namespace_bridge

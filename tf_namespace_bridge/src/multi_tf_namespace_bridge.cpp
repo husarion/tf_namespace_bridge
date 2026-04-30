@@ -14,11 +14,11 @@
 
 #include "tf_namespace_bridge/multi_tf_namespace_bridge.hpp"
 
+#include <chrono>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
 
@@ -30,25 +30,33 @@ const rclcpp::QoS kTfSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
 const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
 const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
 
+constexpr auto kParamPollPeriod = std::chrono::milliseconds(200);
+
 }  // namespace
 
 MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& options)
     : Node("multi_tf_namespace_bridge", options) {
-  declare_parameter<std::vector<std::string>>("namespaces", std::vector<std::string>{});
+  param_listener_ =
+      std::make_shared<multi_tf_namespace_bridge::ParamListener>(get_node_parameters_interface());
+  params_ = param_listener_->get_params();
 
   tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
   tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
 
-  param_cb_handle_ = add_on_set_parameters_callback(
-      [this](const std::vector<rclcpp::Parameter>& params) { return OnSetParameters(params); });
-
-  const auto initial = get_parameter("namespaces").as_string_array();
-  if (initial.empty()) {
+  if (params_.namespaces.empty()) {
     RCLCPP_WARN(get_logger(),
                 "No namespaces configured — node is idle. Set the 'namespaces' parameter to start "
                 "bridging.");
   }
-  UpdateSubscriptions(initial);
+  UpdateSubscriptions(params_.namespaces);
+
+  param_poll_timer_ = create_wall_timer(kParamPollPeriod, [this]() { OnParamPoll(); });
+}
+
+void MultiTfNamespaceBridge::OnParamPoll() {
+  if (!param_listener_->is_old(params_)) return;
+  params_ = param_listener_->get_params();
+  UpdateSubscriptions(params_.namespaces);
 }
 
 void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>& namespaces) {
@@ -79,19 +87,6 @@ void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>&
         "/" + ns + "/tf_static", kTfStaticQos,
         [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg, ns); });
   }
-}
-
-rcl_interfaces::msg::SetParametersResult MultiTfNamespaceBridge::OnSetParameters(
-    const std::vector<rclcpp::Parameter>& parameters) {
-  for (const auto& param : parameters) {
-    if (param.get_name() == "namespaces") {
-      UpdateSubscriptions(param.as_string_array());
-    }
-  }
-
-  rcl_interfaces::msg::SetParametersResult result;
-  result.successful = true;
-  return result;
 }
 
 void MultiTfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg,

@@ -1,0 +1,8 @@
+---
+multi_tf_namespace_bridge:
+  namespaces:
+    type: string_array
+    default_value: []
+    description: List of robot namespaces to bridge into the global TF tree.
+    validation:
+      unique<>:
