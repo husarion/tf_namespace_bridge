@@ -113,27 +113,3 @@ Patterns are anchored — `wheel*` matches `wheel_left` but not `front_wheel_lef
 **Example:** filter `['wheel*']` against a robot publishing `odom→base_link` (dynamic) and `base_link→wheel_*` (static) bridges every wheel transform plus auto-includes `base_link` and `odom` so RViz can resolve `world → wheel_*`.
 
 **Invalid patterns** (e.g. an empty string) are rejected: the bridge logs an `ERROR` and keeps the previously applied filter.
-
----
-
-## QoS notes
-
-`/tf_static` uses `transient_local` durability — late-joining subscribers receive the last known static transforms immediately. The bridge preserves this behavior end-to-end.
-
----
-
-## Dependencies
-
-- `rclcpp`
-- `tf2_msgs`
-- `generate_parameter_library`
-
----
-
-## Build
-
-```bash
-cd <workspace>
-colcon build --packages-select tf_namespace_bridge
-source install/setup.bash
-```
