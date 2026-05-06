@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <unistd.h>
+
 #include <chrono>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -176,6 +179,70 @@ TEST_F(TfNamespaceBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
   // Running without a namespace would subscribe and publish to /tf simultaneously,
   // creating an infinite feedback loop. The node must refuse to start.
   EXPECT_THROW(SetUpWithNamespace(""), std::invalid_argument);
+}
+
+// --- YAML params-file scenarios for empty / sentinel filters ---
+//
+// These tests document how rclcpp's --params-file YAML loader behaves for
+// empty and "no filter" array values. The bridge guarantees pass-through for
+// [""] and ["*"]; [] is fundamentally rejected by rclcpp before our code
+// runs (the YAML loader cannot type-tag an empty sequence), so we assert
+// the failure mode rather than silently work around it.
+
+namespace {
+
+std::string WriteParamsFile(const std::string& contents) {
+  char tmpl[] = "/tmp/tf_namespace_bridge_test_XXXXXX.yaml";
+  int fd = mkstemps(tmpl, 5);
+  if (fd >= 0) {
+    [[maybe_unused]] auto written = ::write(fd, contents.data(), contents.size());
+    ::close(fd);
+  }
+  return tmpl;
+}
+
+rclcpp::NodeOptions OptionsForYaml(const std::string& ns, const std::string& yaml_path) {
+  rclcpp::NodeOptions opts;
+  opts.arguments({"--ros-args", "-r", "__ns:=/" + ns, "--params-file", yaml_path});
+  return opts;
+}
+
+}  // namespace
+
+TEST(TfNamespaceBridgeYamlConfig, EmptyArrayInYamlIsRejectedByRclcpp) {
+  // rclcpp's YAML parameter loader cannot infer the element type of an empty
+  // sequence, so it stores `frame_filters: []` as PARAMETER_NOT_SET and the
+  // ParamListener then fails to convert. Documented limitation; users should
+  // pass [""] or ["*"] instead. The throw originates from Node base class
+  // construction, before our class body runs — we cannot catch it.
+  const auto path = WriteParamsFile(
+      "/**:\n  tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: []\n");
+  auto opts = OptionsForYaml("robot_yaml_empty", path);
+  EXPECT_THROW(std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts),
+               rclcpp::exceptions::InvalidParameterValueException);
+  std::remove(path.c_str());
+}
+
+TEST(TfNamespaceBridgeYamlConfig, EmptyStringSentinelInYamlIsAcceptedAsPassThrough) {
+  // [""] is the recommended workaround for the empty-array limitation. The
+  // FrameFilter silently skips empty patterns, leaving the filter inactive.
+  const auto path = WriteParamsFile(
+      "/**:\n  tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: [\"\"]\n");
+  auto opts = OptionsForYaml("robot_yaml_empty_str", path);
+  EXPECT_NO_THROW(
+      { auto bridge = std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts); });
+  std::remove(path.c_str());
+}
+
+TEST(TfNamespaceBridgeYamlConfig, StarPatternInYamlIsAcceptedAsPassThrough) {
+  // ["*"] is the alternative workaround — the regex matches every frame, so
+  // the bridge behaves as pass-through (with a tiny per-frame regex cost).
+  const auto path = WriteParamsFile(
+      "/**:\n  tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: [\"*\"]\n");
+  auto opts = OptionsForYaml("robot_yaml_star", path);
+  EXPECT_NO_THROW(
+      { auto bridge = std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts); });
+  std::remove(path.c_str());
 }
 
 // --- Frame filter integration ---

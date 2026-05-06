@@ -53,10 +53,26 @@ TEST(FrameFilterTest, EmptyPatternsAreInactive) {
   EXPECT_FALSE(f.active());
 }
 
-TEST(FrameFilterTest, SetPatternsRejectsEmptyString) {
+TEST(FrameFilterTest, SetPatternsSkipsEmptyStringsAlongsidePatterns) {
+  // Empty entries are silently skipped so callers can use [""] as a "no filter"
+  // sentinel without surfacing as an invalid-glob error.
   FrameFilter f;
-  EXPECT_FALSE(f.SetPatterns({"valid", ""}));
-  EXPECT_FALSE(f.active());  // previous patterns unchanged (none)
+  ASSERT_TRUE(f.SetPatterns({"", "wheel*"}));
+  EXPECT_TRUE(f.active());
+  auto result = f.Apply(MakeMessage({{"base_link", "wheel_fl"}, {"base_link", "imu_link"}}));
+  EXPECT_EQ(Children(result.out_msg), (std::vector<std::string>{"wheel_fl"}));
+}
+
+TEST(FrameFilterTest, SetPatternsAllEmptyStringsBecomesInactive) {
+  // [""] / ["", "", ""] collapse to no patterns -> inactive (pure pass-through).
+  // This is the launch-friendly sentinel: launch YAML cannot pass an empty
+  // string_array override, but [""] survives type-tagging and means the same.
+  FrameFilter f;
+  ASSERT_TRUE(f.SetPatterns({""}));
+  EXPECT_FALSE(f.active());
+  auto result = f.Apply(MakeMessage({{"odom", "base_link"}, {"base_link", "imu_link"}}));
+  EXPECT_EQ(Children(result.out_msg), (std::vector<std::string>{"base_link", "imu_link"}));
+  EXPECT_TRUE(result.newly_auto_included.empty());
 }
 
 TEST(FrameFilterTest, InactiveFilterPassesEverythingUnchanged) {

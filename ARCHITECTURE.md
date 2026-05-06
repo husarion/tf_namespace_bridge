@@ -218,7 +218,7 @@ Implemented in `frame_filter.cpp::GlobToRegex`:
 | `.`, `+`, `(`, `)`, `[`, `]`, `{`, `}`, `^`, `$`, `\`, `\|` | escaped (literal) |
 | any other | literal |
 
-Patterns are anchored (`^…$`) — full-string match, no substring matches. Empty patterns are rejected by `SetPatterns` (returns false).
+Patterns are anchored (`^…$`) — full-string match, no substring matches. **Empty pattern strings are silently skipped** by `SetPatterns` (they are not errors). This matters because `[""]` is a useful sentinel that survives YAML loading where bare `[]` does not (see 7.10). After skipping, an all-empty input collapses to no patterns → filter inactive → pure pass-through with zero per-frame overhead.
 
 ### 7.3. Auto-include of parents
 
@@ -266,9 +266,49 @@ The bridge skips publishing when the post-filter message has no transforms — s
 `generate_parameter_library` does the storage and validation; the bridge polls `param_listener_->is_old(params_)` every 200 ms (constant `kParamPollPeriod`) and applies changes:
 
 - `namespaces` change → `UpdateSubscriptions` adds/removes per-namespace state.
-- `frame_filters` change → validate via a probe `FrameFilter::SetPatterns`; if valid, propagate to every per-namespace filter and reset `summary_pending`. If invalid (e.g. an empty pattern), log `ERROR` and keep the previously applied filter.
+- `frame_filters` change → validate via a probe `FrameFilter::SetPatterns`; if valid, propagate to every per-namespace filter and reset `summary_pending`. The bridge logs `Applied new frame_filters: [...]` when active, `Cleared frame_filters (pass-through).` when the new value collapses to inactive. Invalid patterns log `ERROR` and keep the previously applied filter.
 
 Trade-off: 0–200 ms latency on parameter reaction. Reactive `add_on_set_parameters_callback` was rejected to avoid mixing two parameter mechanisms; the latency is acceptable for fleet reconfiguration.
+
+### 7.10. YAML params-file: `[]` is rejected by rclcpp, use `[""]` or `["*"]`
+
+`rclcpp`'s YAML parameter loader cannot infer the element type of an empty sequence. A `--params-file` containing:
+
+```yaml
+/**:
+  tf_namespace_bridge:
+    ros__parameters:
+      frame_filters: []
+```
+
+is loaded as `PARAMETER_NOT_SET`; `ParamListener` then throws `InvalidParameterValueException` from `parameter_value_from`. The throw originates **inside `rclcpp::Node`'s constructor**, before our class body runs — `try`/`catch` in our constructor cannot intercept it (verified by tracing: a `RCLCPP_INFO` at the top of the body never fires). Pre-processing the params file via `NodeOptions::arguments()` would require reimplementing rcl arg parsing and was rejected as disproportionately invasive.
+
+**Workaround pattern enforced by tests:** users pass either
+
+- `frame_filters: [""]` — empty entries silently skipped by `FrameFilter::SetPatterns` → filter inactive → identical to no filter, zero per-frame overhead, OR
+- `frame_filters: ["*"]` — regex matches every frame → identical observable behavior, tiny per-frame regex cost.
+
+Three integration tests per bridge (`*YamlConfig::*`) write real `/tmp/*.yaml` files and load them via `--params-file`:
+
+- `EmptyArrayInYamlIsRejectedByRclcpp` — asserts the failure (`EXPECT_THROW`) so any future change in rclcpp's behavior is caught.
+- `EmptyStringSentinelInYamlIsAcceptedAsPassThrough` — asserts no throw with `[""]`.
+- `StarPatternInYamlIsAcceptedAsPassThrough` — asserts no throw with `["*"]`.
+
+The launch file defaults follow the same pattern (`default: "['']"` with `type: yaml`), and `README.md`'s "Frame filters" section spells the limitation out in user-facing terms.
+
+### 7.11. Launch YAML frontend keywords
+
+The launch YAML frontend (`launch_yaml`) uses `pkg`/`exec`/`param` instead of the longer `package`/`executable`/`parameters` keywords found in Python launch and many YAML examples online. Initial commits used the long form and silently never ran (build was green because gtests don't invoke `ros2 launch`). Always smoke-test launch files manually after editing:
+
+```bash
+ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml namespace:=robot1
+```
+
+Other launch_yaml gotchas hit during this work:
+
+- `description:` and other free-text fields go through Python's parser at some point — em-dash `—` (U+2014) and other non-ASCII punctuation cause `SyntaxError`. Stick to plain ASCII `-`.
+- `$(eval ...)` substitutions choke on apostrophes inside (`var('foo')`); the substitution mini-grammar interprets `'` as a quote opener. Workaround: use `var("foo")` with double quotes inside, single-quoted YAML value outside.
+- For typed parameters, prefer `type: yaml` so launch parses the substitution result with `yaml.safe_load`. `type: list_of_str` enforces a strict up-front type check that rejects substitution-as-string.
 
 ---
 
@@ -287,7 +327,9 @@ Trade-off: 0–200 ms latency on parameter reaction. Reactive `add_on_set_parame
 
 - [x] Migrate parameters to `generate_parameter_library` — commit `5531e0f`.
 - [x] Add `FrameFilter` helper with glob whitelist + parent auto-include — commit `9fa1f39`.
-- [x] Integrate `frame_filters` parameter end-to-end in both bridges — commit (this).
+- [x] Integrate `frame_filters` parameter end-to-end in both bridges — commit `bf45d62`.
+- [x] Fix launch YAML keywords (`pkg`/`exec`/`param`), document the rclcpp empty-array limit, add YAML-config integration tests for `[]` / `[""]` / `["*"]` — commit (this).
 - [ ] Promote `frame_filters` glob validation into a custom `generate_parameter_library` validator so invalid patterns are rejected at the rclcpp layer rather than via runtime ERROR log.
+- [ ] Pre-process `--params-file` content to replace `frame_filters: []` with `frame_filters: [""]` before `Node` ctor sees it (would require parsing rcl arg handling — currently judged not worth the invasiveness).
 
 When a new feature lands, add a short check-off here with the commit that delivered it, so it's easy to trace *why* a design decision changed later.

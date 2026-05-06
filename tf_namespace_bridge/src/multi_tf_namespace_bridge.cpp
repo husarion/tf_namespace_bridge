@@ -62,7 +62,9 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
                  "(pass-through).");
   }
 
-  if (!applied_filters_.empty()) {
+  // Log only when the filter is actually active. After empty-entry skipping
+  // (see FrameFilter::SetPatterns), inputs like [""] resolve to inactive.
+  if (probe.active()) {
     RCLCPP_INFO(get_logger(), "Active frame_filters: [%s]", Join(applied_filters_, ", ").c_str());
   }
 
@@ -92,8 +94,12 @@ void MultiTfNamespaceBridge::OnParamPoll() {
         state.summary_pending = false;
       }
       applied_filters_ = new_params.frame_filters;
-      RCLCPP_INFO(get_logger(), "Applied new frame_filters: [%s]",
-                  Join(applied_filters_, ", ").c_str());
+      if (probe.active()) {
+        RCLCPP_INFO(get_logger(), "Applied new frame_filters: [%s]",
+                    Join(applied_filters_, ", ").c_str());
+      } else {
+        RCLCPP_INFO(get_logger(), "Cleared frame_filters (pass-through).");
+      }
     } else {
       RCLCPP_ERROR(get_logger(),
                    "Invalid glob pattern(s) in frame_filters; keeping previous filter [%s]",

@@ -112,4 +112,18 @@ Patterns are anchored — `wheel*` matches `wheel_left` but not `front_wheel_lef
 
 **Example:** filter `['wheel*']` against a robot publishing `odom→base_link` (dynamic) and `base_link→wheel_*` (static) bridges every wheel transform plus auto-includes `base_link` and `odom` so RViz can resolve `world → wheel_*`.
 
-**Invalid patterns** (e.g. an empty string) are rejected: the bridge logs an `ERROR` and keeps the previously applied filter.
+**Empty patterns are silently skipped.** `[""]`, `["", "", ""]`, etc. all collapse to no patterns and disable filtering (pure pass-through, zero regex overhead). This makes `[""]` an idiomatic "no filter" sentinel.
+
+**Important — `frame_filters: []` (bare empty list) in a YAML params file is rejected by rclcpp**, with the error `parameter_value_from failed for parameter 'frame_filters': No parameter value set`. This is an `rclcpp` YAML-loader limitation: it cannot infer the element type of an empty sequence and stores it as `PARAMETER_NOT_SET`. The throw originates inside `rclcpp::Node`'s constructor, before our code runs, so it cannot be caught and worked around. Use `frame_filters: [""]` (empty string sentinel) or `frame_filters: ["*"]` (regex matching everything) — both are equivalent to no filter from the bridge's perspective. The integration tests `EmptyArrayInYamlIsRejectedByRclcpp` document this contract.
+
+**Launch defaults:** both launch files default `frame_filters` to `"['']"`. The launch arg is parsed as YAML (`type: yaml`), so override it with the same form:
+
+```bash
+ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml \
+  namespace:=robot1 frame_filters:="['odom', 'base_link', 'wheel*']"
+
+ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml \
+  namespaces:="['robot1', 'robot2']" frame_filters:="['wheel*']"
+```
+
+An empty list `[]` default is not used because launch YAML cannot type-tag empty array overrides — rclcpp would reject it. When using `ros2 run` directly, simply omit the `-p frame_filters:=...` flag and the schema's empty-list default takes effect.

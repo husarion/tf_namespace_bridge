@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <unistd.h>
+
 #include <chrono>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -199,6 +202,59 @@ TEST_F(MultiTfNamespaceBridgeTest, RuntimeRemoveNamespaceDestroysSubscription) {
   // ParamListener is polled every 200ms; allow extra margin on top of DDS teardown.
   EXPECT_TRUE(WaitFor(1500ms, [&] { return pub->get_subscription_count() == 0; }))
       << "Bridge subscription not removed after namespace was cleared";
+}
+
+// --- YAML params-file scenarios for empty / sentinel filters ---
+//
+// Mirror of the single-bridge YAML tests. See test_tf_namespace_bridge.cpp
+// for the rationale.
+
+namespace {
+
+std::string WriteParamsFile(const std::string& contents) {
+  char tmpl[] = "/tmp/multi_tf_namespace_bridge_test_XXXXXX.yaml";
+  int fd = mkstemps(tmpl, 5);
+  if (fd >= 0) {
+    [[maybe_unused]] auto written = ::write(fd, contents.data(), contents.size());
+    ::close(fd);
+  }
+  return tmpl;
+}
+
+rclcpp::NodeOptions OptionsForYaml(const std::string& yaml_path) {
+  rclcpp::NodeOptions opts;
+  opts.arguments({"--ros-args", "--params-file", yaml_path});
+  return opts;
+}
+
+}  // namespace
+
+TEST(MultiTfNamespaceBridgeYamlConfig, EmptyArrayInYamlIsRejectedByRclcpp) {
+  const auto path = WriteParamsFile(
+      "/**:\n  multi_tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: []\n");
+  EXPECT_THROW(std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>(OptionsForYaml(path)),
+               rclcpp::exceptions::InvalidParameterValueException);
+  std::remove(path.c_str());
+}
+
+TEST(MultiTfNamespaceBridgeYamlConfig, EmptyStringSentinelInYamlIsAcceptedAsPassThrough) {
+  const auto path = WriteParamsFile(
+      "/**:\n  multi_tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: [\"\"]\n");
+  EXPECT_NO_THROW({
+    auto bridge =
+        std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>(OptionsForYaml(path));
+  });
+  std::remove(path.c_str());
+}
+
+TEST(MultiTfNamespaceBridgeYamlConfig, StarPatternInYamlIsAcceptedAsPassThrough) {
+  const auto path = WriteParamsFile(
+      "/**:\n  multi_tf_namespace_bridge:\n    ros__parameters:\n      frame_filters: [\"*\"]\n");
+  EXPECT_NO_THROW({
+    auto bridge =
+        std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>(OptionsForYaml(path));
+  });
+  std::remove(path.c_str());
 }
 
 // --- Frame filter integration ---

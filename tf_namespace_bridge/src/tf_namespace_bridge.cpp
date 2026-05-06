@@ -97,8 +97,12 @@ void TfNamespaceBridge::OnParamPoll() {
     if (filter_.SetPatterns(new_params.frame_filters)) {
       applied_filters_ = new_params.frame_filters;
       summary_pending_ = false;
-      RCLCPP_INFO(get_logger(), "Applied new frame_filters: [%s]",
-                  Join(applied_filters_, ", ").c_str());
+      if (filter_.active()) {
+        RCLCPP_INFO(get_logger(), "Applied new frame_filters: [%s]",
+                    Join(applied_filters_, ", ").c_str());
+      } else {
+        RCLCPP_INFO(get_logger(), "Cleared frame_filters (pass-through).");
+      }
     } else {
       RCLCPP_ERROR(get_logger(),
                    "Invalid glob pattern(s) in frame_filters; keeping previous filter [%s]",

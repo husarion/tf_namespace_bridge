@@ -202,6 +202,8 @@ These things are easy to break — verify them in every PR:
 7. **Frame filter applies symmetrically to `/tf` and `/tf_static`.** Filtering only one would leave the bridged tree partially connected. Test `FilterAppliesToTfStatic` guards the static path.
 8. **Empty post-filter messages are not republished** (intentional — saves DDS bandwidth). If you ever change this, update `EmptyMessageIsNotRepublished` tests.
 9. **Tests run in isolated `ROS_DOMAIN_ID=89` with `ROS_LOCALHOST_ONLY=1`.** Necessary because sibling packages in the workspace (`rosbot_ros`) may publish on the default domain and pollute `/tf` during integration tests. See `feedback_test_isolation_ros_domain` in memory.
+10. **`frame_filters: []` in a YAML params file throws — use `[""]` or `["*"]` instead.** rclcpp's YAML loader cannot type-tag empty sequences; the `InvalidParameterValueException` originates inside `Node`'s constructor before our body runs and cannot be caught. `FrameFilter::SetPatterns` silently skips empty entries, so `[""]` is the canonical "no filter" sentinel. Tests `*YamlConfig::EmptyArrayInYamlIsRejectedByRclcpp` lock this behavior in. See ARCHITECTURE.md §7.10.
+11. **Launch YAML uses `pkg`/`exec`/`param` (not `package`/`executable`/`parameters`).** The longer Python-launch keywords silently never run via `launch_yaml` (build is green because gtests don't invoke `ros2 launch`). Always smoke-test `ros2 launch …` after editing launch files. See ARCHITECTURE.md §7.11 for other gotchas (em-dashes, eval apostrophes, `type: yaml` vs `list_of_str`).
 
 ---
 
@@ -214,7 +216,8 @@ These things are easy to break — verify them in every PR:
 | Frame filter (glob + auto-include) | [src/frame_filter.cpp](tf_namespace_bridge/src/frame_filter.cpp), [include/tf_namespace_bridge/frame_filter.hpp](tf_namespace_bridge/include/tf_namespace_bridge/frame_filter.hpp) |
 | QoS constants | top of both bridge `*.cpp` files (anonymous namespace) |
 | Which parameters are declared? | YAML schemas in `src/*_parameters.yaml` (consumed by `generate_parameter_library`) |
-| Launch file format | [launch/*.yaml](tf_namespace_bridge/launch/) (YAML, not Python — since commit `004ca7a`) |
+| Launch file format | [launch/*.yaml](tf_namespace_bridge/launch/) (YAML, not Python — since commit `004ca7a`; uses `pkg`/`exec`/`param` keywords) |
+| Why does `frame_filters: []` throw? | ARCHITECTURE.md §7.10 — rclcpp YAML loader limit; use `[""]` or `["*"]` |
 | CI requirements | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 | Hook list | [.pre-commit-config.yaml](.pre-commit-config.yaml) |
 | Design decisions / invariants | [ARCHITECTURE.md](ARCHITECTURE.md) |

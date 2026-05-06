@@ -3,21 +3,28 @@ launch:
 
   - arg:
       name: namespaces
-      default: robot1,robot2
-      description: Comma-separated list of robot namespaces
+      default: "['robot1', 'robot2']"
+      description: YAML list of robot namespaces. Example "['robot1', 'robot2']".
 
   - arg:
       name: frame_filters
-      default: ''
+      default: "['']"
       description: >
-        Comma-separated glob patterns matched against child_frame_id.
-        Empty = pass-through. Example: 'odom,base_link,wheel*'.
+        YAML list of glob patterns matched against child_frame_id. Default
+        "['']" disables filtering (pass-through) - empty entries are silently
+        skipped by the bridge. A bare "[]" cannot be used as the launch
+        default: rclcpp's YAML parameter loader cannot type-tag empty arrays
+        and would reject the override. Example: "['odom', 'wheel*']".
 
   - node:
-      package: tf_namespace_bridge
-      executable: multi_tf_namespace_bridge
+      pkg: tf_namespace_bridge
+      exec: multi_tf_namespace_bridge
       name: multi_tf_namespace_bridge
       output: screen
-      parameters:
-        - namespaces: $(eval var('namespaces').split(','))
-        - frame_filters: $(eval [s for s in var('frame_filters').split(',') if s])
+      param:
+        - name: namespaces
+          type: yaml
+          value: $(var namespaces)
+        - name: frame_filters
+          type: yaml
+          value: $(var frame_filters)

@@ -77,6 +77,12 @@ bool FrameFilter::SetPatterns(const std::vector<std::string>& patterns) {
   std::vector<std::regex> compiled;
   compiled.reserve(patterns.size());
   for (const auto& p : patterns) {
+    // Empty patterns are silently skipped. This lets callers use [""] (or
+    // ["", ...]) as an idiomatic "no filter" sentinel — necessary because
+    // launch YAML cannot type-tag an empty array override, so passing [] as
+    // a parameter override is rejected by rclcpp. After skipping, an empty
+    // result leaves the filter inactive (pass-through).
+    if (p.empty()) continue;
     auto re = GlobToRegex(p);
     if (!re) return false;
     compiled.push_back(std::move(*re));
