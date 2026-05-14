@@ -1,6 +1,6 @@
 # CLAUDE.md — tf_namespace_bridge
 
-Practical guide for working in this repo for Claude Code. When we add a new feature, node, parameter, or convention — **update this file and `ARCHITECTURE.md`**.
+Practical guide for working in this repo for Claude Code. When we add a new feature, node, parameter, or convention — **update this file plus `docs/specification.md` (public contract) and `docs/architecture.md` (design)**.
 
 ---
 
@@ -9,7 +9,7 @@ Practical guide for working in this repo for Claude Code. When we add a new feat
 - **What it is:** ROS 2 (Jazzy, C++17) package that bridges TF from per-robot namespaces (`/<ns>/tf`, `/<ns>/tf_static`) into the global `/tf`, `/tf_static` with prefixed frame names (`base_link → robot1/base_link`).
 - **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter).
 - **Parameters:** generated via [`generate_parameter_library`](https://github.com/PickNikRobotics/generate_parameter_library) (YAML schemas in `src/*_parameters.yaml`). `namespaces` (multi only) and `frame_filters` (both) are runtime-updatable through a 200 ms ParamListener poll.
-- **`frame_filters`** is a glob whitelist on `child_frame_id` with auto-include of missing parents — see [Frame filtering](ARCHITECTURE.md#9-frame-filtering-glob-whitelist--auto-include-of-parents) in ARCHITECTURE.md.
+- **`frame_filters`** is a glob whitelist on `child_frame_id` with auto-include of missing parents — public contract in [docs/specification.md §6](docs/specification.md#6-frame-filtering), internals in [docs/architecture.md §6](docs/architecture.md#6-frame-filtering-internals).
 - **Workspace:** `~/Husarion/Workspaces/rosbot_ws` (sibling packages: `rosbot_ros`, `husarion_*`, `micro-ROS-Agent`).
 - **Branches:** `main` (stable), `jazzy` (active — work happens here). **Never commit directly to `main`.**
 
@@ -20,13 +20,17 @@ Practical guide for working in this repo for Claude Code. When we add a new feat
 ```text
 tf_namespace_bridge/                       # repo root
 ├── CLAUDE.md                              # this file
-├── ARCHITECTURE.md                        # design & invariants
 ├── README.md                              # user-facing docs
 ├── LICENSE                                # Apache 2.0
 ├── .clang-format                          # Google + ColumnLimit 100
 ├── .pre-commit-config.yaml                # see "Pre-commit" below
 ├── .markdownlint.yaml                     # MD013 disabled
 ├── .github/workflows/ci.yml               # pre-commit + build-and-test
+├── docs/
+│   ├── specification.md                   # public contract (params, topics, QoS, invariants)
+│   ├── architecture.md                    # design decisions, internals, rationale
+│   └── benchmarks/
+│       └── rust-vs-cpp-2026-05.md         # why this stays in C++
 └── tf_namespace_bridge/                              # ament_cmake package (nested — see commit 249249a)
     ├── CMakeLists.txt
     ├── package.xml
@@ -63,7 +67,7 @@ tf_namespace_bridge/                       # repo root
    - What we add/change and **why** (business requirement / bug / API extension).
    - Which nodes, topics, parameters, TF frames it touches.
    - Whether the public API (parameters, topics, QoS) changes — and if it breaks compatibility.
-2. **Identify danger zones** — review the ["Critical invariants"](#critical-invariants) section and ARCHITECTURE.md. Specifically think about:
+2. **Identify danger zones** — review the ["Critical invariants"](#critical-invariants) section, [docs/specification.md §7](docs/specification.md#7-critical-invariants), and [docs/architecture.md](docs/architecture.md). Specifically think about:
    - **QoS** — QoS mismatch = silent subscription drop. See `kTfPubQos`, `kTfStaticQos`.
    - **Feedback loops** — `tf_namespace_bridge` in the root namespace == publishes on `/tf` and subscribes from `/tf` → infinite loop. Hence the `throw` in the constructor.
    - **Runtime parameters** — `multi_tf_namespace_bridge` must correctly create/destroy subscriptions when `namespaces` changes.
@@ -74,7 +78,7 @@ tf_namespace_bridge/                       # repo root
 6. **Tests** — **every new function → new gtest**. No test, no merge.
 7. **Pre-commit + build + colcon test** — see sections below. Everything green locally.
 8. **Commit + PR onto `jazzy`** (not `main`). Flag breaking API changes in the PR description.
-9. **Update `CLAUDE.md` and `ARCHITECTURE.md`** if you add a feature, parameter, node, topic, or change an invariant.
+9. **Update `CLAUDE.md`, `docs/specification.md`, and `docs/architecture.md`** if you add a feature, parameter, node, topic, or change an invariant. Specification first if the change is user-observable; architecture if only internals shift.
 
 ---
 
@@ -184,7 +188,7 @@ CI (`.github/workflows/ci.yml`) runs pre-commit + colcon build + colcon test on 
 4. In `CMakeLists.txt`: `add_executable(<name> src/<name>.cpp src/<name>_node.cpp)`, `target_include_directories`, `ament_target_dependencies`, add to `install(TARGETS ...)`.
 5. gtest in `test/test_<name>.cpp` + section in `if(BUILD_TESTING)` in `CMakeLists.txt` linking the `.cpp` (not `_node.cpp`!).
 6. Launch file in `launch/<name>.yaml` (YAML format — see commit `004ca7a`).
-7. Update `README.md` (user docs) and `ARCHITECTURE.md` (design).
+7. Update `README.md` (user docs), `docs/specification.md` (public contract — if API changes), and `docs/architecture.md` (design — if internals or rationale changes).
 8. If a new dependency appears — add `<depend>` to `package.xml`.
 
 ---
@@ -202,8 +206,8 @@ These things are easy to break — verify them in every PR:
 7. **Frame filter applies symmetrically to `/tf` and `/tf_static`.** Filtering only one would leave the bridged tree partially connected. Test `FilterAppliesToTfStatic` guards the static path.
 8. **Empty post-filter messages are not republished** (intentional — saves DDS bandwidth). If you ever change this, update `EmptyMessageIsNotRepublished` tests.
 9. **Tests run in isolated `ROS_DOMAIN_ID=89` with `ROS_LOCALHOST_ONLY=1`.** Necessary because sibling packages in the workspace (`rosbot_ros`) may publish on the default domain and pollute `/tf` during integration tests. See `feedback_test_isolation_ros_domain` in memory.
-10. **`frame_filters: []` in a YAML params file throws — use `[""]` or `["*"]` instead.** rclcpp's YAML loader cannot type-tag empty sequences; the `InvalidParameterValueException` originates inside `Node`'s constructor before our body runs and cannot be caught. `FrameFilter::SetPatterns` silently skips empty entries, so `[""]` is the canonical "no filter" sentinel. Tests `*YamlConfig::EmptyArrayInYamlIsRejectedByRclcpp` lock this behavior in. See ARCHITECTURE.md §7.10.
-11. **Launch YAML uses `pkg`/`exec`/`param` (not `package`/`executable`/`parameters`).** The longer Python-launch keywords silently never run via `launch_yaml` (build is green because gtests don't invoke `ros2 launch`). Always smoke-test `ros2 launch …` after editing launch files. See ARCHITECTURE.md §7.11 for other gotchas (em-dashes, eval apostrophes, `type: yaml` vs `list_of_str`).
+10. **`frame_filters: []` in a YAML params file throws — use `[""]` or `["*"]` instead.** rclcpp's YAML loader cannot type-tag empty sequences; the `InvalidParameterValueException` originates inside `Node`'s constructor before our body runs and cannot be caught. `FrameFilter::SetPatterns` silently skips empty entries, so `[""]` is the canonical "no filter" sentinel. Tests `*YamlConfig::EmptyArrayInYamlIsRejectedByRclcpp` lock this behavior in. See [docs/architecture.md §7.1](docs/architecture.md#71-rclcpp-yaml-loader-rejects-frame_filters-).
+11. **Launch YAML uses `pkg`/`exec`/`param` (not `package`/`executable`/`parameters`).** The longer Python-launch keywords silently never run via `launch_yaml` (build is green because gtests don't invoke `ros2 launch`). Always smoke-test `ros2 launch …` after editing launch files. See [docs/architecture.md §7.2](docs/architecture.md#72-launch-yaml-gotchas) for other gotchas (em-dashes, eval apostrophes, `type: yaml` vs `list_of_str`).
 
 ---
 
@@ -217,10 +221,12 @@ These things are easy to break — verify them in every PR:
 | QoS constants | top of both bridge `*.cpp` files (anonymous namespace) |
 | Which parameters are declared? | YAML schemas in `src/*_parameters.yaml` (consumed by `generate_parameter_library`) |
 | Launch file format | [launch/*.yaml](tf_namespace_bridge/launch/) (YAML, not Python — since commit `004ca7a`; uses `pkg`/`exec`/`param` keywords) |
-| Why does `frame_filters: []` throw? | ARCHITECTURE.md §7.10 — rclcpp YAML loader limit; use `[""]` or `["*"]` |
+| Why does `frame_filters: []` throw? | [docs/architecture.md §7.1](docs/architecture.md#71-rclcpp-yaml-loader-rejects-frame_filters-) — rclcpp YAML loader limit; use `[""]` or `["*"]` |
 | CI requirements | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 | Hook list | [.pre-commit-config.yaml](.pre-commit-config.yaml) |
-| Design decisions / invariants | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Public contract (params, topics, QoS, invariants) | [docs/specification.md](docs/specification.md) |
+| Design decisions / internals / rationale | [docs/architecture.md](docs/architecture.md) |
+| Why C++ not Rust | [docs/benchmarks/rust-vs-cpp-2026-05.md](docs/benchmarks/rust-vs-cpp-2026-05.md) |
 
 ---
 
@@ -235,5 +241,6 @@ Checklist to paste into every feature PR:
 - [ ] `colcon test --packages-select tf_namespace_bridge` green.
 - [ ] **`README.md`** updated if the change is user-facing (new parameter, topic, executable).
 - [ ] **`CLAUDE.md`** updated if it introduces a new convention, command, or critical invariant.
-- [ ] **`ARCHITECTURE.md`** updated if the design changes (new module, new data flow, new assumption).
+- [ ] **`docs/specification.md`** updated if the public contract changes (parameter, topic, QoS, invariant).
+- [ ] **`docs/architecture.md`** updated if the design changes (new module, new data flow, new assumption, new gotcha).
 - [ ] PR targets `jazzy`, not `main`.
