@@ -12,11 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <csignal>
+
 #include "rclcpp/rclcpp.hpp"
 #include "tf_namespace_bridge/tf_namespace_bridge.hpp"
 
+namespace {
+// rclcpp's default SIGINT/SIGTERM handler unconditionally logs
+// `signal_handler(signum=N)` at INFO via the `rclcpp` logger. Replace it with
+// a quiet handler that just calls `rclcpp::shutdown()`. We use
+// `SignalHandlerOptions::None` in init() to prevent rclcpp from claiming the
+// signals first.
+void QuietSignalHandler(int /*signum*/) { rclcpp::shutdown(); }
+}  // namespace
+
 int main(int argc, char** argv) {
-  rclcpp::init(argc, argv);
+  rclcpp::init(argc, argv, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, QuietSignalHandler);
+  std::signal(SIGTERM, QuietSignalHandler);
   rclcpp::spin(std::make_shared<tf_namespace_bridge::TfNamespaceBridge>());
   rclcpp::shutdown();
   return 0;

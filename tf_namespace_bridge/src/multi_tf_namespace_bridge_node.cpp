@@ -12,11 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <csignal>
+
 #include "rclcpp/rclcpp.hpp"
 #include "tf_namespace_bridge/multi_tf_namespace_bridge.hpp"
 
+namespace {
+// See tf_namespace_bridge_node.cpp for rationale.
+void QuietSignalHandler(int /*signum*/) { rclcpp::shutdown(); }
+}  // namespace
+
 int main(int argc, char** argv) {
-  rclcpp::init(argc, argv);
+  rclcpp::init(argc, argv, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, QuietSignalHandler);
+  std::signal(SIGTERM, QuietSignalHandler);
   rclcpp::spin(std::make_shared<tf_namespace_bridge::MultiTfNamespaceBridge>());
   rclcpp::shutdown();
   return 0;
