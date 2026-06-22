@@ -16,11 +16,13 @@
 #define TF_NAMESPACE_BRIDGE__MULTI_TF_NAMESPACE_BRIDGE_HPP_
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
 #include "tf_namespace_bridge/frame_filter.hpp"
@@ -39,6 +41,10 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
     FrameFilter filter;
     std::chrono::steady_clock::time_point last_auto_include_change;
     bool summary_pending = false;
+    // Accumulated, already-prefixed static transforms keyed by child_frame_id,
+    // so the latched /tf_static snapshot is always the COMPLETE tree.
+    std::map<std::string, geometry_msgs::msg::TransformStamped> static_cache;
+    bool static_received = false;
   };
 
   void UpdateSubscriptions(const std::vector<std::string>& namespaces);
@@ -49,6 +55,12 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
   void ProcessAndPublish(NamespaceState& state, const std::string& ns,
                          const tf2_msgs::msg::TFMessage& msg,
                          const rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr& publisher);
+  // (Re)create one namespace's /tf_static subscription (startup + watchdog).
+  void SubscribeStatic(const std::string& ns, NamespaceState& state);
+  // Re-arm any namespace whose latched /tf_static hasn't been delivered yet.
+  void OnStaticWatchdog();
+  // Publish the full accumulated static tree for one namespace.
+  void PublishStaticCache(NamespaceState& state);
   tf2_msgs::msg::TFMessage PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
                                          const std::string& prefix) const;
 
@@ -56,6 +68,7 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
   multi_tf_namespace_bridge::Params params_;
   rclcpp::TimerBase::SharedPtr param_poll_timer_;
   rclcpp::TimerBase::SharedPtr summary_timer_;
+  rclcpp::TimerBase::SharedPtr static_watchdog_timer_;
   std::vector<std::string> applied_filters_;
   std::unordered_map<std::string, NamespaceState> namespaces_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_pub_;
