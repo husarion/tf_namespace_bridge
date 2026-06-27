@@ -91,6 +91,14 @@ The frame prefix is derived automatically from the node's namespace (`robot1/`).
 
 ---
 
+## Static TF (`/tf_static`) reliability
+
+`/tf_static` is latched (transient_local): a robot publishes its static transforms **once** at startup. A bridge that subscribes *after* that — common on a cold boot, and routinely under `rmw_zenoh` where discovery settles late — can miss the latched message, so those static frames never reach the global tree.
+
+The bridge guards against this with a static-reception watchdog: it periodically re-arms its `/<ns>/tf_static` subscription and re-publishes the static transforms it has already collected. Late-joining or reconnecting consumers (and the bridge itself after a discovery hiccup) converge on the full static tree without restarting any node.
+
+---
+
 ## Frame filters
 
 `frame_filters` is a whitelist applied to `child_frame_id` of every transform passing through the bridge. Empty list disables filtering.
