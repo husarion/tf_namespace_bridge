@@ -68,7 +68,7 @@ tf_namespace_bridge/                       # repo root
    - Which nodes, topics, parameters, TF frames it touches.
    - Whether the public API (parameters, topics, QoS) changes — and if it breaks compatibility.
 2. **Identify danger zones** — review the ["Critical invariants"](#critical-invariants) section, [docs/specification.md §7](docs/specification.md#7-critical-invariants), and [docs/architecture.md](docs/architecture.md). Specifically think about:
-   - **QoS** — QoS mismatch = silent subscription drop. See `kTfPubQos`, `kTfStaticQos`.
+   - **QoS** — QoS mismatch = silent subscription drop. See `kTfPubQos`, `kTfStaticPubQos`, `kTfStaticSubQos`.
    - **Feedback loops** — `tf_namespace_bridge` in the root namespace == publishes on `/tf` and subscribes from `/tf` → infinite loop. Hence the `throw` in the constructor.
    - **Runtime parameters** — `multi_tf_namespace_bridge` must correctly create/destroy subscriptions when `namespaces` changes.
    - **Transient local on `/tf_static`** — late joiners must receive the latched message.
@@ -115,7 +115,7 @@ ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml namespace:=robot1
 # or: ros2 run tf_namespace_bridge tf_namespace_bridge --ros-args -r __ns:=/robot1
 
 # Multi-robot
-ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml namespaces:=robot1,robot2
+ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml namespaces:="['robot1', 'robot2']"
 # Runtime update:
 ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"
 ```
@@ -163,7 +163,7 @@ CI (`.github/workflows/ci.yml`) runs pre-commit + colcon build + colcon test on 
 - **Language:** C++17. `#include` order: standard → ROS → internal (Google style — enforced by clang-format).
 - **Namespace:** all code lives in `namespace tf_namespace_bridge { ... }`. Local constants (e.g. QoS) go in an anonymous `namespace { ... }` inside the `.cpp`.
 - **Naming:**
-  - Classes/structs: `PascalCase` (e.g. `MultiTfNamespaceBridge`, `NamespaceSubscriptions`).
+  - Classes/structs: `PascalCase` (e.g. `MultiTfNamespaceBridge`, `NamespaceState`).
   - Methods: `PascalCase` (Google style as used in this repo, e.g. `OnTf`, `UpdateSubscriptions`, `PrefixMessage`).
   - Fields: `snake_case_` with trailing underscore (`tf_pub_`, `subscriptions_`).
   - Constants: `kCamelCase` (`kTfPubQos`).

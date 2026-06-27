@@ -29,13 +29,13 @@ Both parameters can be updated at runtime (poll period 200 ms). Subscriptions ar
 | Topic | QoS |
 |---|---|
 | `/<ns>/tf` | best_effort, volatile, keep_last(100) |
-| `/<ns>/tf_static` | reliable, transient_local, keep_last(1) |
+| `/<ns>/tf_static` | reliable, transient_local, keep_last(100) |
 
 **Published topics:**
 
 | Topic | QoS |
 |---|---|
-| `/tf` | best_effort, volatile, keep_last(100) |
+| `/tf` | reliable, volatile, keep_last(100) |
 | `/tf_static` | reliable, transient_local, keep_last(1) |
 
 **Usage:**
@@ -70,13 +70,13 @@ Lightweight single-robot bridge. Run inside a robot's namespace — it automatic
 | Relative topic | Resolves to | QoS |
 |---|---|---|
 | `tf` | `/<ns>/tf` | best_effort, volatile, keep_last(100) |
-| `tf_static` | `/<ns>/tf_static` | reliable, transient_local, keep_last(1) |
+| `tf_static` | `/<ns>/tf_static` | reliable, transient_local, keep_last(100) |
 
 **Published topics:**
 
 | Topic | QoS |
 |---|---|
-| `/tf` | best_effort, volatile, keep_last(100) |
+| `/tf` | reliable, volatile, keep_last(100) |
 | `/tf_static` | reliable, transient_local, keep_last(1) |
 
 **Usage:**

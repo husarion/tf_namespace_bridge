@@ -54,9 +54,9 @@ Both parameters are validated and stored via [`generate_parameter_library`](http
 | Node | Topic | Resolves to | Reliability | Durability | History |
 |---|---|---|---|---|---|
 | single | `tf` (relative) | `/<ns>/tf` | best_effort | volatile | KeepLast(100) |
-| single | `tf_static` (relative) | `/<ns>/tf_static` | reliable | transient_local | KeepLast(1) |
+| single | `tf_static` (relative) | `/<ns>/tf_static` | reliable | transient_local | KeepLast(100) |
 | multi | `/<ns>/tf` | — | best_effort | volatile | KeepLast(100) |
-| multi | `/<ns>/tf_static` | — | reliable | transient_local | KeepLast(1) |
+| multi | `/<ns>/tf_static` | — | reliable | transient_local | KeepLast(100) |
 
 ### 4.2 Published
 
@@ -167,7 +167,7 @@ ros2 run tf_namespace_bridge tf_namespace_bridge \
 
 ```bash
 ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml \
-  namespaces:=robot1,robot2
+  namespaces:="['robot1', 'robot2']"
 
 # Runtime update
 ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"

@@ -13,14 +13,14 @@ How the package is built internally and **why** each non-obvious decision is wha
 **File:** `src/tf_namespace_bridge.cpp`, `include/tf_namespace_bridge/tf_namespace_bridge.hpp`.
 **Executable:** `tf_namespace_bridge` (`src/tf_namespace_bridge_node.cpp`).
 
-Lightweight bridge launched **inside** a robot's namespace. The frame prefix is computed once from `get_namespace()` at construction. Two subscriptions (`tf`, `tf_static`), two publishers (`/tf`, `/tf_static`), one `FrameFilter`, two timers (param poll, summary debounce). No state machine — every callback is independent.
+Lightweight bridge launched **inside** a robot's namespace. The frame prefix is computed once from `get_namespace()` at construction. Two subscriptions (`tf`, `tf_static`), two publishers (`/tf`, `/tf_static`), one `FrameFilter`, three timers (param poll, summary debounce, static-reception watchdog). The static watchdog re-arms the `/tf_static` subscription until the upstream latched tree is delivered (one-shot transient_local delivery can be lost in a startup discovery race, notably under rmw_zenoh), then periodically re-publishes the accumulated static cache so late-joining consumers converge. No state machine — every callback is independent.
 
 ### 1.2 `MultiTfNamespaceBridge` (multi-robot, single process)
 
 **File:** `src/multi_tf_namespace_bridge.cpp`, `include/tf_namespace_bridge/multi_tf_namespace_bridge.hpp`.
 **Executable:** `multi_tf_namespace_bridge` (`src/multi_tf_namespace_bridge_node.cpp`).
 
-Runs **outside** any robot namespace (typically root). Holds `std::unordered_map<std::string, NamespaceSubscriptions>` where each entry owns a `(tf_sub, tf_static_sub, FrameFilter)` triple. The `namespaces` parameter list drives `UpdateSubscriptions`, which diffs current vs desired keys and adds/removes subscriptions while preserving untouched ones.
+Runs **outside** any robot namespace (typically root). Holds `std::unordered_map<std::string, NamespaceState>` where each entry owns the per-namespace `tf_sub`, `tf_static_sub`, `FrameFilter`, plus the static-cache state (`static_cache`, `static_received`) and summary-debounce bookkeeping. The `namespaces` parameter list drives `UpdateSubscriptions`, which diffs current vs desired keys and adds/removes subscriptions while preserving untouched ones. A shared static-reception watchdog (see §1.1) re-arms each namespace's `/tf_static` subscription and re-publishes its accumulated cache.
 
 **Why dynamic:** a fleet grows and shrinks at runtime (docking, failure, dynamic join). Restarting the node would tear down `/tf` continuity for the remaining robots.
 
@@ -55,10 +55,13 @@ Test `PrefixesStaticTfFrames` validates this end-to-end by deliberately reversin
 In both `*.cpp` files, in the anonymous namespace at top of file:
 
 ```cpp
-const rclcpp::QoS kTfSubQos    = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
-const rclcpp::QoS kTfPubQos    = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
-const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+const rclcpp::QoS kTfSubQos       = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
+const rclcpp::QoS kTfPubQos       = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
+const rclcpp::QoS kTfStaticPubQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+const rclcpp::QoS kTfStaticSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable().transient_local();
 ```
+
+The static topic uses two depths on purpose: the publisher latches depth 1 (it always re-publishes the full accumulated tree, so one slot holds the complete snapshot), while the subscriber keeps depth 100 to match the `tf2_ros` static-listener convention — a namespace can have several static broadcasters, each latching its own snapshot, and depth 1 would drop all but one when they arrive together.
 
 When you change QoS in one file, **you almost always have to change it in both** — the contract with consumers is global.
 
@@ -131,7 +134,8 @@ Both bridge test files share the same pattern: `rclcpp::executors::SingleThreade
 | `PrefixesHeaderFrameIdAndChildFrameId` | basic happy path |
 | `PrefixesAllTransformsInMessage` | every transform in a batch is prefixed |
 | `PrefixesStaticTfFrames` | `transient_local` preserved (publish→sub→get) |
-| `EmptyMessageDoesNotCrash` | empty-message edge case |
+| `AccumulatesStaticTfAcrossMessages` (single) | static cache accumulates the complete tree across multiple messages |
+| `EmptyMessageProducesEmptyOutput` (frame filter) | empty-message edge case |
 | `RootNamespaceThrowsToPreventFeedbackLoop` (single) | guard against feedback loop |
 | `RuntimeAddNamespaceBridgesNewRobot` (multi) | dynamic ns addition |
 | `RuntimeRemoveNamespaceDestroysSubscription` (multi) | dynamic ns removal, verified via `get_subscription_count()` instead of message-absence — DDS teardown is async |
@@ -236,7 +240,7 @@ Other launch_yaml gotchas hit during this work:
 
 ## 8. Environment assumptions
 
-- **ROS 2 Jazzy** — see `package.xml`, `ci.yml`, `.vscode/settings.json`. CI runs on `ubuntu-24.04`. Not tested on Humble; the `rclcpp::QoS` builder API should be compatible, but `transient_local` semantics have only been verified on Jazzy.
+- **ROS 2 Jazzy** — see `package.xml`, `.github/workflows/ci.yml`. CI runs on `ubuntu-24.04`. Not tested on Humble; the `rclcpp::QoS` builder API should be compatible, but `transient_local` semantics have only been verified on Jazzy.
 - **C++17** required (CMakeLists sets it if not defined).
 - **The package is pure C++**, no Python components (even though pre-commit has flake8/black/isort wired up for future use).
 - **Tests run with `ROS_DOMAIN_ID=89` and `ROS_LOCALHOST_ONLY=1`** so a sibling package or a real robot publishing on the default domain cannot pollute `/tf` during integration tests. Set in `CMakeLists.txt` via `ament_add_gtest(... ENV ${TEST_ENV})`.
