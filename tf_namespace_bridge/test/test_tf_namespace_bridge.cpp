@@ -14,6 +14,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -153,6 +154,64 @@ TEST_F(TfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   ASSERT_TRUE(WaitFor(500ms, [&] { return got; })) << "No message received on /tf_static";
   ASSERT_EQ(received.transforms.size(), 1u);
   EXPECT_EQ(received.transforms[0].header.frame_id, "robot1/base_link");
+  EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
+}
+
+TEST_F(TfNamespaceBridgeTest, AccumulatesStaticTfAcrossMessages) {
+  // Regression: /tf_static can arrive across SEPARATE messages (multiple static
+  // broadcasters, or RSP re-publishing a subset). The latched republish must
+  // contain the COMPLETE accumulated tree, not just the last message — pre-fix,
+  // the KeepLast(1) latched publisher kept only the final message and silently
+  // dropped every other broadcaster's frames.
+  SetUpWithNamespace("robot1");
+
+  auto pub =
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+  WaitFor(150ms, [] { return false; });  // let the bridge's sub match
+  pub->publish(MakeMessage({{"base_link", "cover_link"}}));
+  WaitFor(150ms, [] { return false; });
+  pub->publish(MakeMessage({{"cover_link", "rplidar_link"}}));
+
+  // Subscribe AFTER both publishes — transient_local must hand us the full set.
+  tf2_msgs::msg::TFMessage received;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf_static", kTfStaticQos,
+      [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) { received = *msg; });
+
+  ASSERT_TRUE(WaitFor(1500ms, [&] { return received.transforms.size() >= 2u; }))
+      << "latched /tf_static did not carry both accumulated transforms";
+  ASSERT_EQ(received.transforms.size(), 2u);
+  std::vector<std::string> children{received.transforms[0].child_frame_id,
+                                    received.transforms[1].child_frame_id};
+  EXPECT_NE(std::find(children.begin(), children.end(), "robot1/cover_link"), children.end());
+  EXPECT_NE(std::find(children.begin(), children.end(), "robot1/rplidar_link"), children.end());
+}
+
+TEST_F(TfNamespaceBridgeTest, WatchdogRearmSurvivesIntoLaterDelivery) {
+  // Regression for the watchdog re-arm path itself (OnStaticWatchdog /
+  // SubscribeStatic), not just the accumulation it enables. No /tf_static
+  // publisher exists yet at startup, so the watchdog (2s cadence) re-arms the
+  // subscription at least once with static_received_ still false. The point
+  // is that the re-armed subscription must still be able to receive a message
+  // that arrives afterwards — a broken re-arm (e.g. subscribing to the wrong
+  // topic, or leaving a dangling callback) would silently never receive.
+  SetUpWithNamespace("robot1");
+
+  // Outlive at least one watchdog tick with nothing published.
+  WaitFor(2500ms, [] { return false; });
+
+  auto pub =
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+  WaitFor(150ms, [] { return false; });  // let the re-armed sub match
+  pub->publish(MakeMessage({{"base_link", "cover_link"}}));
+
+  tf2_msgs::msg::TFMessage received;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf_static", kTfStaticQos,
+      [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) { received = *msg; });
+
+  ASSERT_TRUE(WaitFor(1500ms, [&] { return !received.transforms.empty(); }))
+      << "no /tf_static delivered after the watchdog re-armed the subscription";
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
 }
 

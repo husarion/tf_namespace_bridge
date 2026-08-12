@@ -16,7 +16,7 @@ Result: one TF tree where every frame is unique, every robot can be visualised t
 
 ## 2. Nodes
 
-The package exposes two executables. Both produce semantically identical output on `/tf` / `/tf_static`; they differ only in launch model.
+The package exposes two standalone executables plus a composable-node plugin for the single-robot bridge. All three produce semantically identical output on `/tf` / `/tf_static`; they differ only in launch/process model.
 
 ### 2.1 `tf_namespace_bridge` — single robot
 
@@ -31,6 +31,10 @@ Launched **inside** the robot namespace. The frame prefix is derived from `get_n
 ### 2.2 `multi_tf_namespace_bridge` — fleet, one process
 
 Launched **outside** any robot namespace (typically root). One process bridges any number of robots configured via the `namespaces` parameter. Subscriptions for each namespace are created at startup and live for as long as the namespace remains in the parameter value.
+
+### 2.3 `tf_namespace_bridge::TfNamespaceBridge` — composable node
+
+The single-robot class is also exported as an `rclcpp_components` plugin (library `tf_namespace_bridge_component`), so it can be loaded into a shared `component_container` instead of running as its own process — one process per robot instead of one process per node. Same class, same constructor, same non-root-namespace requirement as [§2.1](#21-tf_namespace_bridge--single-robot); the node namespace must be set explicitly at load time (e.g. `ros2 component load ... --node-namespace /robot1`), since a container's own namespace is not inherited by nodes loaded into it.
 
 ---
 
@@ -54,9 +58,9 @@ Both parameters are validated and stored via [`generate_parameter_library`](http
 | Node | Topic | Resolves to | Reliability | Durability | History |
 |---|---|---|---|---|---|
 | single | `tf` (relative) | `/<ns>/tf` | best_effort | volatile | KeepLast(100) |
-| single | `tf_static` (relative) | `/<ns>/tf_static` | reliable | transient_local | KeepLast(1) |
+| single | `tf_static` (relative) | `/<ns>/tf_static` | reliable | transient_local | KeepLast(100) |
 | multi | `/<ns>/tf` | — | best_effort | volatile | KeepLast(100) |
-| multi | `/<ns>/tf_static` | — | reliable | transient_local | KeepLast(1) |
+| multi | `/<ns>/tf_static` | — | reliable | transient_local | KeepLast(100) |
 
 ### 4.2 Published
 
@@ -167,7 +171,7 @@ ros2 run tf_namespace_bridge tf_namespace_bridge \
 
 ```bash
 ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml \
-  namespaces:=robot1,robot2
+  namespaces:="['robot1', 'robot2']"
 
 # Runtime update
 ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"

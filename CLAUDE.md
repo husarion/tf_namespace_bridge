@@ -7,7 +7,7 @@ Practical guide for working in this repo for Claude Code. When we add a new feat
 ## TL;DR
 
 - **What it is:** ROS 2 (Jazzy, C++17) package that bridges TF from per-robot namespaces (`/<ns>/tf`, `/<ns>/tf_static`) into the global `/tf`, `/tf_static` with prefixed frame names (`base_link → robot1/base_link`).
-- **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter).
+- **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter). The single bridge is also loadable as an `rclcpp_components` plugin (`tf_namespace_bridge_component`) — see [docs/architecture.md §4.7](docs/architecture.md#47-composable-node-plugin-for-the-single-bridge-tf_namespace_bridge_component).
 - **Parameters:** generated via [`generate_parameter_library`](https://github.com/PickNikRobotics/generate_parameter_library) (YAML schemas in `src/*_parameters.yaml`). `namespaces` (multi only) and `frame_filters` (both) are runtime-updatable through a 200 ms ParamListener poll.
 - **`frame_filters`** is a glob whitelist on `child_frame_id` with auto-include of missing parents — public contract in [docs/specification.md §6](docs/specification.md#6-frame-filtering), internals in [docs/architecture.md §6](docs/architecture.md#6-frame-filtering-internals).
 - **Workspace:** `~/Husarion/Workspaces/rosbot_ws` (sibling packages: `rosbot_ros`, `husarion_*`, `micro-ROS-Agent`).
@@ -41,6 +41,7 @@ tf_namespace_bridge/                       # repo root
     ├── src/
     │   ├── tf_namespace_bridge.cpp                   # class implementation
     │   ├── tf_namespace_bridge_node.cpp              # main()
+    │   ├── tf_namespace_bridge_component_registration.cpp  # rclcpp_components plugin export (separate TU, see docs/architecture.md §4.7)
     │   ├── tf_namespace_bridge_parameters.yaml      # generate_parameter_library schema
     │   ├── multi_tf_namespace_bridge.cpp
     │   ├── multi_tf_namespace_bridge_node.cpp
@@ -68,7 +69,7 @@ tf_namespace_bridge/                       # repo root
    - Which nodes, topics, parameters, TF frames it touches.
    - Whether the public API (parameters, topics, QoS) changes — and if it breaks compatibility.
 2. **Identify danger zones** — review the ["Critical invariants"](#critical-invariants) section, [docs/specification.md §7](docs/specification.md#7-critical-invariants), and [docs/architecture.md](docs/architecture.md). Specifically think about:
-   - **QoS** — QoS mismatch = silent subscription drop. See `kTfPubQos`, `kTfStaticQos`.
+   - **QoS** — QoS mismatch = silent subscription drop. See `kTfPubQos`, `kTfStaticPubQos`, `kTfStaticSubQos`.
    - **Feedback loops** — `tf_namespace_bridge` in the root namespace == publishes on `/tf` and subscribes from `/tf` → infinite loop. Hence the `throw` in the constructor.
    - **Runtime parameters** — `multi_tf_namespace_bridge` must correctly create/destroy subscriptions when `namespaces` changes.
    - **Transient local on `/tf_static`** — late joiners must receive the latched message.
@@ -115,7 +116,7 @@ ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml namespace:=robot1
 # or: ros2 run tf_namespace_bridge tf_namespace_bridge --ros-args -r __ns:=/robot1
 
 # Multi-robot
-ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml namespaces:=robot1,robot2
+ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml namespaces:="['robot1', 'robot2']"
 # Runtime update:
 ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"
 ```
@@ -163,7 +164,7 @@ CI (`.github/workflows/ci.yml`) runs pre-commit + colcon build + colcon test on 
 - **Language:** C++17. `#include` order: standard → ROS → internal (Google style — enforced by clang-format).
 - **Namespace:** all code lives in `namespace tf_namespace_bridge { ... }`. Local constants (e.g. QoS) go in an anonymous `namespace { ... }` inside the `.cpp`.
 - **Naming:**
-  - Classes/structs: `PascalCase` (e.g. `MultiTfNamespaceBridge`, `NamespaceSubscriptions`).
+  - Classes/structs: `PascalCase` (e.g. `MultiTfNamespaceBridge`, `NamespaceState`).
   - Methods: `PascalCase` (Google style as used in this repo, e.g. `OnTf`, `UpdateSubscriptions`, `PrefixMessage`).
   - Fields: `snake_case_` with trailing underscore (`tf_pub_`, `subscriptions_`).
   - Constants: `kCamelCase` (`kTfPubQos`).

@@ -28,11 +28,16 @@ namespace {
 
 const rclcpp::QoS kTfSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
 const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
-const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+// See tf_namespace_bridge.cpp for the rationale: publisher latches the last
+// (always-complete) snapshot; subscriber depth 100 matches the tf2_ros static
+// listener convention.
+const rclcpp::QoS kTfStaticPubQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+const rclcpp::QoS kTfStaticSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable().transient_local();
 
 constexpr auto kParamPollPeriod = std::chrono::milliseconds(200);
 constexpr auto kSummaryPollPeriod = std::chrono::milliseconds(500);
 constexpr auto kSummaryDebounce = std::chrono::seconds(3);
+constexpr auto kStaticWatchdogPeriod = std::chrono::seconds(2);
 
 std::string Join(const std::vector<std::string>& items, const std::string& sep) {
   std::string out;
@@ -69,7 +74,7 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
   }
 
   tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
-  tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
+  tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticPubQos);
 
   if (params_.namespaces.empty()) {
     RCLCPP_WARN(get_logger(),
@@ -80,6 +85,33 @@ MultiTfNamespaceBridge::MultiTfNamespaceBridge(const rclcpp::NodeOptions& option
 
   param_poll_timer_ = create_wall_timer(kParamPollPeriod, [this]() { OnParamPoll(); });
   summary_timer_ = create_wall_timer(kSummaryPollPeriod, [this]() { OnSummaryPoll(); });
+  static_watchdog_timer_ =
+      create_wall_timer(kStaticWatchdogPeriod, [this]() { OnStaticWatchdog(); });
+}
+
+void MultiTfNamespaceBridge::SubscribeStatic(const std::string& ns, NamespaceState& state) {
+  state.tf_static_sub = create_subscription<tf2_msgs::msg::TFMessage>(
+      "/" + ns + "/tf_static", kTfStaticSubQos,
+      [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg, ns); });
+}
+
+void MultiTfNamespaceBridge::OnStaticWatchdog() {
+  // Re-arm the /tf_static subscription for any namespace whose upstream latched
+  // tree hasn't arrived yet (one-shot topic; a lost transient_local delivery
+  // never re-sends). See tf_namespace_bridge.cpp.
+  for (auto& [ns, state] : namespaces_) {
+    if (!state.static_received) {
+      RCLCPP_WARN_ONCE(get_logger(),
+                       "[%s] No /tf_static received yet; re-arming subscription until the latched "
+                       "static tree is delivered.",
+                       ns.c_str());
+      SubscribeStatic(ns, state);
+    }
+  }
+  // Periodically re-publish so downstream consumers converge even if their
+  // late-join races (see tf_namespace_bridge.cpp for the rationale). Merged
+  // across namespaces, not per-namespace — see PublishAllStaticCaches.
+  PublishAllStaticCaches();
 }
 
 void MultiTfNamespaceBridge::OnParamPoll() {
@@ -154,9 +186,7 @@ void MultiTfNamespaceBridge::UpdateSubscriptions(const std::vector<std::string>&
         "/" + ns + "/tf", kTfSubQos,
         [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg, ns); });
 
-    state.tf_static_sub = create_subscription<tf2_msgs::msg::TFMessage>(
-        "/" + ns + "/tf_static", kTfStaticQos,
-        [this, ns](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg, ns); });
+    SubscribeStatic(ns, state);
   }
 }
 
@@ -171,7 +201,35 @@ void MultiTfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPt
                                         const std::string& ns) {
   auto it = namespaces_.find(ns);
   if (it == namespaces_.end()) return;
-  ProcessAndPublish(it->second, ns, *msg, tf_static_pub_);
+  auto& state = it->second;
+
+  auto result = state.filter.Apply(*msg);
+  for (const auto& f : result.newly_auto_included) {
+    RCLCPP_INFO(get_logger(), "[%s] Frame '%s' is parent of a bridged frame; auto-included",
+                ns.c_str(), f.c_str());
+  }
+  if (!result.newly_auto_included.empty()) {
+    state.last_auto_include_change = std::chrono::steady_clock::now();
+    state.summary_pending = true;
+  }
+  if (result.out_msg.transforms.empty()) return;
+
+  // Accumulate + re-publish the COMPLETE cross-namespace tree (see
+  // tf_namespace_bridge.cpp and PublishAllStaticCaches).
+  for (const auto& t : PrefixMessage(result.out_msg, ns + "/").transforms) {
+    state.static_cache[t.child_frame_id] = t;
+  }
+  state.static_received = true;
+  PublishAllStaticCaches();
+}
+
+void MultiTfNamespaceBridge::PublishAllStaticCaches() {
+  tf2_msgs::msg::TFMessage out;
+  for (const auto& [ns, state] : namespaces_) {
+    for (const auto& [child, transform] : state.static_cache) out.transforms.push_back(transform);
+  }
+  if (out.transforms.empty()) return;
+  tf_static_pub_->publish(out);
 }
 
 void MultiTfNamespaceBridge::ProcessAndPublish(

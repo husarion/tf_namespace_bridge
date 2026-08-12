@@ -27,11 +27,22 @@ namespace {
 
 const rclcpp::QoS kTfSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).best_effort();
 const rclcpp::QoS kTfPubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable();
-const rclcpp::QoS kTfStaticQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+// Publisher latches the LAST published message; we always publish the full
+// accumulated static tree, so depth 1 is enough to hand the complete snapshot
+// to a late consumer.
+const rclcpp::QoS kTfStaticPubQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+// Subscriber depth matches the tf2_ros static-listener convention (100): a
+// namespace can have several static broadcasters, each latching its own
+// snapshot, and depth 1 can drop all but one when they arrive together.
+const rclcpp::QoS kTfStaticSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable().transient_local();
 
 constexpr auto kParamPollPeriod = std::chrono::milliseconds(200);
 constexpr auto kSummaryPollPeriod = std::chrono::milliseconds(500);
 constexpr auto kSummaryDebounce = std::chrono::seconds(3);
+// Reception watchdog cadence. /tf_static is one-shot + latched; if the single
+// transient_local delivery is lost in a startup discovery race (notably
+// rmw_zenoh), it never re-sends, so re-arm the subscription until it lands.
+constexpr auto kStaticWatchdogPeriod = std::chrono::seconds(2);
 
 std::string Join(const std::vector<std::string>& items, const std::string& sep) {
   std::string out;
@@ -75,18 +86,43 @@ TfNamespaceBridge::TfNamespaceBridge(const rclcpp::NodeOptions& options)
   }
 
   tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf", kTfPubQos);
-  tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticQos);
+  tf_static_pub_ = create_publisher<tf2_msgs::msg::TFMessage>("/tf_static", kTfStaticPubQos);
 
   // Relative topic names resolve to /<namespace>/tf and /<namespace>/tf_static
   tf_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
       "tf", kTfSubQos, [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTf(msg); });
 
-  tf_static_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
-      "tf_static", kTfStaticQos,
-      [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg); });
+  SubscribeStatic();
 
   param_poll_timer_ = create_wall_timer(kParamPollPeriod, [this]() { OnParamPoll(); });
   summary_timer_ = create_wall_timer(kSummaryPollPeriod, [this]() { OnSummaryPoll(); });
+  static_watchdog_timer_ =
+      create_wall_timer(kStaticWatchdogPeriod, [this]() { OnStaticWatchdog(); });
+}
+
+void TfNamespaceBridge::SubscribeStatic() {
+  tf_static_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
+      "tf_static", kTfStaticSubQos,
+      [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg); });
+}
+
+void TfNamespaceBridge::OnStaticWatchdog() {
+  if (!static_received_) {
+    RCLCPP_WARN_ONCE(get_logger(),
+                     "No /tf_static received yet; re-arming the subscription until the upstream "
+                     "latched static tree is delivered (one-shot topic, never re-sent).");
+    SubscribeStatic();  // fresh subscription forces a new transient_local query
+    return;
+  }
+  // Periodically re-publish the full accumulated tree. transient_local latching
+  // is one-shot, and late-join delivery is unreliable across this transport
+  // (rmw_zenoh) at EVERY hop: a downstream consumer (foxglove_bridge, RViz,
+  // nav2) that joins late — or whose transient_local late-join races — gets
+  // nothing until a LIVE message arrives. A low-rate re-latch guarantees
+  // convergence. Static TF is tiny and idempotent in tf2 buffers, so the cost
+  // is negligible. (This is what makes the end-to-end overlay survive a cold
+  // boot, where the consumer chain comes up in an unpredictable order.)
+  PublishStaticCache();
 }
 
 void TfNamespaceBridge::OnParamPoll() {
@@ -127,17 +163,7 @@ void TfNamespaceBridge::OnSummaryPoll() {
   summary_pending_ = false;
 }
 
-void TfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-  ProcessAndPublish(*msg, tf_pub_);
-}
-
-void TfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
-  ProcessAndPublish(*msg, tf_static_pub_);
-}
-
-void TfNamespaceBridge::ProcessAndPublish(
-    const tf2_msgs::msg::TFMessage& msg,
-    const rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr& publisher) {
+FrameFilter::ApplyResult TfNamespaceBridge::ApplyAndLog(const tf2_msgs::msg::TFMessage& msg) {
   auto result = filter_.Apply(msg);
 
   for (const auto& f : result.newly_auto_included) {
@@ -147,9 +173,37 @@ void TfNamespaceBridge::ProcessAndPublish(
     last_auto_include_change_ = std::chrono::steady_clock::now();
     summary_pending_ = true;
   }
+  return result;
+}
 
+void TfNamespaceBridge::OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+  auto result = ApplyAndLog(*msg);
   if (result.out_msg.transforms.empty()) return;
-  publisher->publish(PrefixMessage(result.out_msg));
+  tf_pub_->publish(PrefixMessage(result.out_msg));
+}
+
+void TfNamespaceBridge::OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg) {
+  auto result = ApplyAndLog(*msg);
+  if (result.out_msg.transforms.empty()) return;
+
+  // Accumulate into the by-child cache and re-publish the COMPLETE tree. The
+  // previous code published each incoming message independently through a
+  // latched publisher, so the latched snapshot kept only the LAST message —
+  // every other static broadcaster's frames silently vanished for late
+  // subscribers. Accumulating keeps the latched /tf_static whole.
+  for (const auto& t : PrefixMessage(result.out_msg).transforms) {
+    static_cache_[t.child_frame_id] = t;
+  }
+  static_received_ = true;
+  PublishStaticCache();
+}
+
+void TfNamespaceBridge::PublishStaticCache() {
+  if (static_cache_.empty()) return;
+  tf2_msgs::msg::TFMessage out;
+  out.transforms.reserve(static_cache_.size());
+  for (const auto& [child, transform] : static_cache_) out.transforms.push_back(transform);
+  tf_static_pub_->publish(out);
 }
 
 tf2_msgs::msg::TFMessage TfNamespaceBridge::PrefixMessage(

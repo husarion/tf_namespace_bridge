@@ -14,6 +14,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -145,6 +146,43 @@ TEST_F(MultiTfNamespaceBridgeTest, PrefixesStaticTfFrames) {
   ASSERT_EQ(received.transforms.size(), 1u);
   EXPECT_EQ(received.transforms[0].header.frame_id, "robot1/base_link");
   EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
+}
+
+TEST_F(MultiTfNamespaceBridgeTest, LatchedStaticCacheMergesAllNamespaces) {
+  // Regression: tf_static_pub_ is ONE shared KeepLast(1) latched publisher
+  // for every namespace. Pre-fix, each namespace's static cache was published
+  // on its own via PublishStaticCache(state), so the LAST namespace processed
+  // overwrote the latched history of every other namespace — a late
+  // subscriber only ever saw one robot's static tree. The merged publish
+  // (PublishAllStaticCaches) must carry every namespace's frames together.
+  bridge_->set_parameter(
+      rclcpp::Parameter("namespaces", std::vector<std::string>{"robot1", "robot2"}));
+
+  auto pub1 =
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+  auto pub2 =
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot2/tf_static", kTfStaticQos);
+
+  ASSERT_TRUE(WaitFor(1000ms, [&] {
+    return pub1->get_subscription_count() > 0 && pub2->get_subscription_count() > 0;
+  })) << "Bridge did not subscribe to both namespaces";
+
+  pub1->publish(MakeMessage({{"base_link", "cover_link"}}));
+  pub2->publish(MakeMessage({{"base_link", "cover_link"}}));
+
+  // Subscribe late — transient_local must hand us the merged, latest snapshot.
+  tf2_msgs::msg::TFMessage received;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf_static", kTfStaticQos,
+      [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) { received = *msg; });
+
+  ASSERT_TRUE(WaitFor(1500ms, [&] { return received.transforms.size() >= 2u; }))
+      << "latched /tf_static did not carry both namespaces' static transforms";
+  ASSERT_EQ(received.transforms.size(), 2u);
+  std::vector<std::string> children{received.transforms[0].child_frame_id,
+                                    received.transforms[1].child_frame_id};
+  EXPECT_NE(std::find(children.begin(), children.end(), "robot1/cover_link"), children.end());
+  EXPECT_NE(std::find(children.begin(), children.end(), "robot2/cover_link"), children.end());
 }
 
 TEST_F(MultiTfNamespaceBridgeTest, EmptyMessageIsNotRepublished) {

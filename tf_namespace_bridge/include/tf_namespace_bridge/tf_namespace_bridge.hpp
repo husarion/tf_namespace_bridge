@@ -16,10 +16,12 @@
 #define TF_NAMESPACE_BRIDGE__TF_NAMESPACE_BRIDGE_HPP_
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
 #include "tf_namespace_bridge/frame_filter.hpp"
@@ -36,8 +38,17 @@ class TfNamespaceBridge : public rclcpp::Node {
   void OnSummaryPoll();
   void OnTf(const tf2_msgs::msg::TFMessage::SharedPtr msg);
   void OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg);
-  void ProcessAndPublish(const tf2_msgs::msg::TFMessage& msg,
-                         const rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr& publisher);
+  // Shared filter + auto-include-logging step for both /tf and /tf_static.
+  FrameFilter::ApplyResult ApplyAndLog(const tf2_msgs::msg::TFMessage& msg);
+  // (Re)create the /tf_static subscription. Used at startup and by the
+  // reception watchdog to force a fresh transient_local query.
+  void SubscribeStatic();
+  // Reception watchdog: re-arm the /tf_static subscription until the upstream
+  // latched static tree has been delivered (it is one-shot and never re-sent).
+  void OnStaticWatchdog();
+  // Publish the full accumulated static tree (so the latched snapshot is always
+  // complete, regardless of how many messages it arrived across).
+  void PublishStaticCache();
   tf2_msgs::msg::TFMessage PrefixMessage(const tf2_msgs::msg::TFMessage& msg) const;
 
   std::string prefix_;
@@ -46,10 +57,17 @@ class TfNamespaceBridge : public rclcpp::Node {
   std::chrono::steady_clock::time_point last_auto_include_change_;
   bool summary_pending_ = false;
 
+  // Accumulated, already-prefixed static transforms keyed by child_frame_id
+  // (each frame has exactly one parent → last-wins is correct). Lets us always
+  // re-publish the COMPLETE tree instead of just the last message received.
+  std::map<std::string, geometry_msgs::msg::TransformStamped> static_cache_;
+  bool static_received_ = false;
+
   std::shared_ptr<ParamListener> param_listener_;
   Params params_;
   rclcpp::TimerBase::SharedPtr param_poll_timer_;
   rclcpp::TimerBase::SharedPtr summary_timer_;
+  rclcpp::TimerBase::SharedPtr static_watchdog_timer_;
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_;
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_sub_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr tf_pub_;
