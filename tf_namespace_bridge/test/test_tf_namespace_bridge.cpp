@@ -187,6 +187,34 @@ TEST_F(TfNamespaceBridgeTest, AccumulatesStaticTfAcrossMessages) {
   EXPECT_NE(std::find(children.begin(), children.end(), "robot1/rplidar_link"), children.end());
 }
 
+TEST_F(TfNamespaceBridgeTest, WatchdogRearmSurvivesIntoLaterDelivery) {
+  // Regression for the watchdog re-arm path itself (OnStaticWatchdog /
+  // SubscribeStatic), not just the accumulation it enables. No /tf_static
+  // publisher exists yet at startup, so the watchdog (2s cadence) re-arms the
+  // subscription at least once with static_received_ still false. The point
+  // is that the re-armed subscription must still be able to receive a message
+  // that arrives afterwards — a broken re-arm (e.g. subscribing to the wrong
+  // topic, or leaving a dangling callback) would silently never receive.
+  SetUpWithNamespace("robot1");
+
+  // Outlive at least one watchdog tick with nothing published.
+  WaitFor(2500ms, [] { return false; });
+
+  auto pub =
+      test_node_->create_publisher<tf2_msgs::msg::TFMessage>("/robot1/tf_static", kTfStaticQos);
+  WaitFor(150ms, [] { return false; });  // let the re-armed sub match
+  pub->publish(MakeMessage({{"base_link", "cover_link"}}));
+
+  tf2_msgs::msg::TFMessage received;
+  auto sub = test_node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf_static", kTfStaticQos,
+      [&](const tf2_msgs::msg::TFMessage::SharedPtr msg) { received = *msg; });
+
+  ASSERT_TRUE(WaitFor(1500ms, [&] { return !received.transforms.empty(); }))
+      << "no /tf_static delivered after the watchdog re-armed the subscription";
+  EXPECT_EQ(received.transforms[0].child_frame_id, "robot1/cover_link");
+}
+
 TEST_F(TfNamespaceBridgeTest, EmptyMessageIsNotRepublished) {
   // Bridge skips publishing when the post-filter message has no transforms,
   // including the trivial case of an empty input. The contract here is twofold:

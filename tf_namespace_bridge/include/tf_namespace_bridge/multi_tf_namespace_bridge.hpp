@@ -59,8 +59,11 @@ class MultiTfNamespaceBridge : public rclcpp::Node {
   void SubscribeStatic(const std::string& ns, NamespaceState& state);
   // Re-arm any namespace whose latched /tf_static hasn't been delivered yet.
   void OnStaticWatchdog();
-  // Publish the full accumulated static tree for one namespace.
-  void PublishStaticCache(NamespaceState& state);
+  // Publish the merged accumulated static tree across ALL namespaces. All
+  // namespaces share one latched (KeepLast(1)) publisher, so a per-namespace
+  // publish would overwrite the others' history — every publish must carry
+  // the complete cross-namespace snapshot.
+  void PublishAllStaticCaches();
   tf2_msgs::msg::TFMessage PrefixMessage(const tf2_msgs::msg::TFMessage& msg,
                                          const std::string& prefix) const;
 

@@ -20,7 +20,9 @@ Lightweight bridge launched **inside** a robot's namespace. The frame prefix is 
 **File:** `src/multi_tf_namespace_bridge.cpp`, `include/tf_namespace_bridge/multi_tf_namespace_bridge.hpp`.
 **Executable:** `multi_tf_namespace_bridge` (`src/multi_tf_namespace_bridge_node.cpp`).
 
-Runs **outside** any robot namespace (typically root). Holds `std::unordered_map<std::string, NamespaceState>` where each entry owns the per-namespace `tf_sub`, `tf_static_sub`, `FrameFilter`, plus the static-cache state (`static_cache`, `static_received`) and summary-debounce bookkeeping. The `namespaces` parameter list drives `UpdateSubscriptions`, which diffs current vs desired keys and adds/removes subscriptions while preserving untouched ones. A shared static-reception watchdog (see §1.1) re-arms each namespace's `/tf_static` subscription and re-publishes its accumulated cache.
+Runs **outside** any robot namespace (typically root). Holds `std::unordered_map<std::string, NamespaceState>` where each entry owns the per-namespace `tf_sub`, `tf_static_sub`, `FrameFilter`, plus the static-cache state (`static_cache`, `static_received`) and summary-debounce bookkeeping. The `namespaces` parameter list drives `UpdateSubscriptions`, which diffs current vs desired keys and adds/removes subscriptions while preserving untouched ones. A shared static-reception watchdog (see §1.1) re-arms any namespace's `/tf_static` subscription that hasn't received yet, then calls `PublishAllStaticCaches()` once.
+
+**`PublishAllStaticCaches()` merges across namespaces, deliberately, not per-namespace.** All namespaces share ONE `tf_static_pub_` (`KeepLast(1)`, `transient_local`) — a DDS writer's latched history holds only its own last sample. Publishing each namespace's cache separately through that one writer (the original implementation) meant every publish overwrote the previous namespace's latched snapshot, so a late-joining subscriber only ever saw whichever namespace was written last. `PublishAllStaticCaches()` therefore gathers every namespace's already-prefixed `static_cache` into a single `TFMessage` before publishing, so the one latched sample always carries the complete cross-namespace tree. Test `LatchedStaticCacheMergesAllNamespaces` guards this.
 
 **Why dynamic:** a fleet grows and shrinks at runtime (docking, failure, dynamic join). Restarting the node would tear down `/tf` continuity for the remaining robots.
 
@@ -135,10 +137,12 @@ Both bridge test files share the same pattern: `rclcpp::executors::SingleThreade
 | `PrefixesAllTransformsInMessage` | every transform in a batch is prefixed |
 | `PrefixesStaticTfFrames` | `transient_local` preserved (publish→sub→get) |
 | `AccumulatesStaticTfAcrossMessages` (single) | static cache accumulates the complete tree across multiple messages |
+| `WatchdogRearmSurvivesIntoLaterDelivery` (single) | the watchdog's re-armed subscription (not just the accumulation it enables) still receives a message published afterwards |
 | `EmptyMessageProducesEmptyOutput` (frame filter) | empty-message edge case |
 | `RootNamespaceThrowsToPreventFeedbackLoop` (single) | guard against feedback loop |
 | `RuntimeAddNamespaceBridgesNewRobot` (multi) | dynamic ns addition |
 | `RuntimeRemoveNamespaceDestroysSubscription` (multi) | dynamic ns removal, verified via `get_subscription_count()` instead of message-absence — DDS teardown is async |
+| `LatchedStaticCacheMergesAllNamespaces` (multi) | the shared latched `/tf_static` publisher carries every namespace's tree, not just the last one processed |
 | `FilterAppliesToTfStatic` (multi) | filter symmetric across `/tf` and `/tf_static` |
 | `EmptyMessageIsNotRepublished` | bandwidth-saving skip |
 | `*YamlConfig::EmptyArrayInYamlIsRejectedByRclcpp` and siblings | lock the `[]` / `[""]` / `["*"]` YAML contract |
