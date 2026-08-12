@@ -125,6 +125,18 @@ Both nodes are **public**; the user picks based on launch architecture.
 
 A Rust port was prototyped and benchmarked against the C++ implementation. For this package (an I/O-bound TF rebroadcaster) the Rust version was **measurably worse**: +40% mean latency, +43% CPU, only −7% RSS. See [benchmarks/rust-vs-cpp-2026-05.md](benchmarks/rust-vs-cpp-2026-05.md) for full numbers and methodology. C++ remains the right choice for this class of work; Rust may be reconsidered for future CPU-bound packages.
 
+### 4.7 Composable-node plugin for the single bridge (`tf_namespace_bridge_component`)
+
+**File:** `src/tf_namespace_bridge_component_registration.cpp` (separate translation unit — see below), CMake target `tf_namespace_bridge_component`.
+
+Only `TfNamespaceBridge` (not the multi-robot node) is exported via `rclcpp_components_register_node()`: on a real fleet you typically run one bridge per robot alongside that robot's other nodes, and loading it into a shared `component_container` avoids one extra process per robot. `MultiTfNamespaceBridge` already amortizes N robots into one process by design (see [§4.4](#44-why-one-multi-robot-node-instead-of-n-single-robot-nodes)), so a composable variant would add nothing.
+
+**Why a separate `.cpp` for the `RCLCPP_COMPONENTS_REGISTER_NODE` macro, instead of adding it to `tf_namespace_bridge.cpp`:** that file is compiled into the plain `tf_namespace_bridge` executable too, which does not depend on `rclcpp_components`. The macro expands to code that needs `rclcpp_components` headers and links against it — putting it in the shared file would drag that dependency into the plain executable target as well. The registration-only file is added as an extra source **only** on the `tf_namespace_bridge_component` library target.
+
+**Gotcha:** `rclcpp_components_register_node()` in `CMakeLists.txt` only wires up `ament_index` / plugin-description metadata (what `ros2 component types` reads). It does **not** emit the `class_loader` export symbol inside the `.so` — without the macro call in a compiled source, `ros2 component load` fails at runtime with `Failed to find class with the requested plugin name`, even though the plugin shows up in `ros2 component types`. Verified end-to-end: `ros2 run rclcpp_components component_container` + `ros2 component load <container> tf_namespace_bridge tf_namespace_bridge::TfNamespaceBridge --node-namespace /robot1`.
+
+**Gotcha:** a container's own `__ns` remap is not inherited by nodes loaded into it — pass `--node-namespace` explicitly at load time, otherwise `TfNamespaceBridge` throws (root-namespace guard, [§1.1](#11-tfnamespacebridge-single-robot)).
+
 ---
 
 ## 5. Tests — what and why

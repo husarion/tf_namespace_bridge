@@ -7,7 +7,7 @@ Practical guide for working in this repo for Claude Code. When we add a new feat
 ## TL;DR
 
 - **What it is:** ROS 2 (Jazzy, C++17) package that bridges TF from per-robot namespaces (`/<ns>/tf`, `/<ns>/tf_static`) into the global `/tf`, `/tf_static` with prefixed frame names (`base_link → robot1/base_link`).
-- **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter).
+- **Two nodes:** `tf_namespace_bridge` (single robot, prefix derived from node namespace) and `multi_tf_namespace_bridge` (list of namespaces, runtime-updatable parameter). The single bridge is also loadable as an `rclcpp_components` plugin (`tf_namespace_bridge_component`) — see [docs/architecture.md §4.7](docs/architecture.md#47-composable-node-plugin-for-the-single-bridge-tf_namespace_bridge_component).
 - **Parameters:** generated via [`generate_parameter_library`](https://github.com/PickNikRobotics/generate_parameter_library) (YAML schemas in `src/*_parameters.yaml`). `namespaces` (multi only) and `frame_filters` (both) are runtime-updatable through a 200 ms ParamListener poll.
 - **`frame_filters`** is a glob whitelist on `child_frame_id` with auto-include of missing parents — public contract in [docs/specification.md §6](docs/specification.md#6-frame-filtering), internals in [docs/architecture.md §6](docs/architecture.md#6-frame-filtering-internals).
 - **Workspace:** `~/Husarion/Workspaces/rosbot_ws` (sibling packages: `rosbot_ros`, `husarion_*`, `micro-ROS-Agent`).
@@ -41,6 +41,7 @@ tf_namespace_bridge/                       # repo root
     ├── src/
     │   ├── tf_namespace_bridge.cpp                   # class implementation
     │   ├── tf_namespace_bridge_node.cpp              # main()
+    │   ├── tf_namespace_bridge_component_registration.cpp  # rclcpp_components plugin export (separate TU, see docs/architecture.md §4.7)
     │   ├── tf_namespace_bridge_parameters.yaml      # generate_parameter_library schema
     │   ├── multi_tf_namespace_bridge.cpp
     │   ├── multi_tf_namespace_bridge_node.cpp

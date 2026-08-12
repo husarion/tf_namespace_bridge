@@ -12,6 +12,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(tf2_msgs REQUIRED)
 
 # Generated parameter libraries
@@ -25,6 +26,8 @@ generate_parameter_library(tf_namespace_bridge_parameters
 add_library(frame_filter STATIC src/frame_filter.cpp)
 target_include_directories(frame_filter PUBLIC include)
 ament_target_dependencies(frame_filter tf2_msgs)
+# Also linked into the SHARED tf_namespace_bridge_component below.
+set_target_properties(frame_filter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # multi_tf_namespace_bridge
 add_executable(multi_tf_namespace_bridge src/multi_tf_namespace_bridge.cpp
@@ -42,8 +45,28 @@ target_link_libraries(tf_namespace_bridge frame_filter
                       tf_namespace_bridge_parameters)
 ament_target_dependencies(tf_namespace_bridge rclcpp tf2_msgs)
 
+# tf_namespace_bridge component (loadable into a component_container)
+add_library(
+  tf_namespace_bridge_component SHARED
+  src/tf_namespace_bridge.cpp
+  src/tf_namespace_bridge_component_registration.cpp)
+target_include_directories(tf_namespace_bridge_component PRIVATE include)
+target_link_libraries(tf_namespace_bridge_component frame_filter
+                      tf_namespace_bridge_parameters)
+ament_target_dependencies(tf_namespace_bridge_component rclcpp
+                          rclcpp_components tf2_msgs)
+rclcpp_components_register_node(
+  tf_namespace_bridge_component PLUGIN "tf_namespace_bridge::TfNamespaceBridge"
+  EXECUTABLE tf_namespace_bridge_component_node)
+
 install(TARGETS multi_tf_namespace_bridge tf_namespace_bridge
         DESTINATION lib/${PROJECT_NAME})
+
+install(
+  TARGETS tf_namespace_bridge_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 

@@ -34,8 +34,7 @@ const rclcpp::QoS kTfStaticPubQos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().
 // Subscriber depth matches the tf2_ros static-listener convention (100): a
 // namespace can have several static broadcasters, each latching its own
 // snapshot, and depth 1 can drop all but one when they arrive together.
-const rclcpp::QoS kTfStaticSubQos =
-    rclcpp::QoS(rclcpp::KeepLast(100)).reliable().transient_local();
+const rclcpp::QoS kTfStaticSubQos = rclcpp::QoS(rclcpp::KeepLast(100)).reliable().transient_local();
 
 constexpr auto kParamPollPeriod = std::chrono::milliseconds(200);
 constexpr auto kSummaryPollPeriod = std::chrono::milliseconds(500);

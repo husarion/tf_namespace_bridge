@@ -16,7 +16,7 @@ Result: one TF tree where every frame is unique, every robot can be visualised t
 
 ## 2. Nodes
 
-The package exposes two executables. Both produce semantically identical output on `/tf` / `/tf_static`; they differ only in launch model.
+The package exposes two standalone executables plus a composable-node plugin for the single-robot bridge. All three produce semantically identical output on `/tf` / `/tf_static`; they differ only in launch/process model.
 
 ### 2.1 `tf_namespace_bridge` — single robot
 
@@ -31,6 +31,10 @@ Launched **inside** the robot namespace. The frame prefix is derived from `get_n
 ### 2.2 `multi_tf_namespace_bridge` — fleet, one process
 
 Launched **outside** any robot namespace (typically root). One process bridges any number of robots configured via the `namespaces` parameter. Subscriptions for each namespace are created at startup and live for as long as the namespace remains in the parameter value.
+
+### 2.3 `tf_namespace_bridge::TfNamespaceBridge` — composable node
+
+The single-robot class is also exported as an `rclcpp_components` plugin (library `tf_namespace_bridge_component`), so it can be loaded into a shared `component_container` instead of running as its own process — one process per robot instead of one process per node. Same class, same constructor, same non-root-namespace requirement as [§2.1](#21-tf_namespace_bridge--single-robot); the node namespace must be set explicitly at load time (e.g. `ros2 component load ... --node-namespace /robot1`), since a container's own namespace is not inherited by nodes loaded into it.
 
 ---
 

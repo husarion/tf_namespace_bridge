@@ -1,137 +1,83 @@
 # tf_namespace_bridge
 
-ROS2 (C++, Jazzy) package for bridging namespaced TF topics into the global TF tree in multi-robot setups.
+ROS 2 (C++, Jazzy) package for bridging namespaced TF topics into the global TF tree in multi-robot setups.
 
 When multiple robots publish transforms under their own namespaces (e.g. `/robot1/tf`), this package republishes those transforms to `/tf` and `/tf_static` with frame names prefixed by the robot's namespace — making all robots visible in a single, unified TF tree.
 
 **Frame renaming example:**
 `base_link → robot1/base_link`, `cover_link → robot1/cover_link`
 
+Full public contract (parameters, topics, QoS, invariants): [docs/specification.md](docs/specification.md). Internals and design rationale: [docs/architecture.md](docs/architecture.md).
+
 ---
 
 ## Nodes
 
-### `multi_tf_namespace_bridge`
+### `multi_tf_namespace_bridge` — one process, many robots
 
-Aggregates TF from multiple robots into the global `/tf` and `/tf_static`.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `namespaces` | `string[]` | List of robot namespaces to bridge, e.g. `["robot1", "robot2"]` |
-| `frame_filters` | `string[]` | Glob patterns matched against `child_frame_id`. Empty list = pass-through. See [Frame filters](#frame-filters). |
-
-Both parameters can be updated at runtime (poll period 200 ms). Subscriptions are created for newly added namespaces and destroyed for removed ones; the filter is applied uniformly to every namespace.
-
-**Subscribed topics** (created per namespace):
-
-| Topic | QoS |
-|---|---|
-| `/<ns>/tf` | best_effort, volatile, keep_last(100) |
-| `/<ns>/tf_static` | reliable, transient_local, keep_last(100) |
-
-**Published topics:**
-
-| Topic | QoS |
-|---|---|
-| `/tf` | reliable, volatile, keep_last(100) |
-| `/tf_static` | reliable, transient_local, keep_last(1) |
-
-**Usage:**
+Run outside any robot namespace (typically root). Bridges every namespace listed in the `namespaces` parameter into the global `/tf` / `/tf_static`.
 
 ```bash
-ros2 run tf_namespace_bridge multi_tf_namespace_bridge \
-  --ros-args -p namespaces:="['robot1', 'robot2']" \
-             -p frame_filters:="['odom', 'base_link', 'wheel*']"
-```
+ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml \
+  namespaces:="['robot1', 'robot2']" frame_filters:="['odom', 'base_link', 'wheel*']"
 
-Runtime update:
-
-```bash
+# Runtime update (applied within 200 ms, no restart needed):
 ros2 param set /multi_tf_namespace_bridge namespaces "['robot1', 'robot2', 'robot3']"
-ros2 param set /multi_tf_namespace_bridge frame_filters "['odom', 'base_link', 'wheel*']"
 ```
 
----
+### `tf_namespace_bridge` — single robot
 
-### `tf_namespace_bridge`
-
-Lightweight single-robot bridge. Run inside a robot's namespace — it automatically bridges that robot's `/tf` and `/tf_static` to the global tree.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `frame_filters` | `string[]` | Glob patterns matched against `child_frame_id`. Empty list = pass-through. See [Frame filters](#frame-filters). |
-
-**Subscribed topics** (resolved within the node's namespace):
-
-| Relative topic | Resolves to | QoS |
-|---|---|---|
-| `tf` | `/<ns>/tf` | best_effort, volatile, keep_last(100) |
-| `tf_static` | `/<ns>/tf_static` | reliable, transient_local, keep_last(100) |
-
-**Published topics:**
-
-| Topic | QoS |
-|---|---|
-| `/tf` | reliable, volatile, keep_last(100) |
-| `/tf_static` | reliable, transient_local, keep_last(1) |
-
-**Usage:**
+Run inside a robot's namespace. The frame prefix is derived automatically from the node's namespace.
 
 ```bash
-ros2 run tf_namespace_bridge tf_namespace_bridge \
-  --ros-args -r __ns:=/robot1 \
-             -p frame_filters:="['odom', 'base_link', 'wheel*']"
+ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml \
+  namespace:=robot1 frame_filters:="['odom', 'base_link', 'wheel*']"
 ```
 
-The frame prefix is derived automatically from the node's namespace (`robot1/`).
+It's also available as an `rclcpp_components` plugin (`tf_namespace_bridge::TfNamespaceBridge`), for loading into a shared `component_container` instead of its own process:
+
+```bash
+ros2 component load /my_container tf_namespace_bridge tf_namespace_bridge::TfNamespaceBridge \
+  --node-namespace /robot1
+```
+
+### Parameters
+
+| Parameter | Type | Node(s) | Description |
+|---|---|---|---|
+| `namespaces` | `string[]` | multi only | Robot namespaces to bridge, e.g. `["robot1", "robot2"]`. Runtime-updatable. |
+| `frame_filters` | `string[]` | both | Glob whitelist on `child_frame_id`. Empty = pass-through. Runtime-updatable. See [Frame filters](#frame-filters) below. |
+
+### Topics
+
+Both nodes publish the merged result on `/tf` (reliable) and `/tf_static` (reliable, latched). Per-namespace input is read from `/<ns>/tf` and `/<ns>/tf_static`. Full QoS table: [docs/specification.md §4](docs/specification.md#4-topics).
 
 ---
 
-## Static TF (`/tf_static`) reliability
+## Static TF reliability
 
-`/tf_static` is latched (transient_local): a robot publishes its static transforms **once** at startup. A bridge that subscribes *after* that — common on a cold boot, and routinely under `rmw_zenoh` where discovery settles late — can miss the latched message, so those static frames never reach the global tree.
-
-The bridge guards against this with a static-reception watchdog: it periodically re-arms its `/<ns>/tf_static` subscription and re-publishes the static transforms it has already collected. Late-joining or reconnecting consumers (and the bridge itself after a discovery hiccup) converge on the full static tree without restarting any node.
+`/tf_static` is a one-shot, latched topic. A bridge that misses the initial delivery (cold boot, `rmw_zenoh` discovery races) recovers automatically via a background watchdog — no manual restart needed. Details: [docs/specification.md §7](docs/specification.md#7-critical-invariants).
 
 ---
 
 ## Frame filters
 
-`frame_filters` is a whitelist applied to `child_frame_id` of every transform passing through the bridge. Empty list disables filtering.
-
-**Glob syntax:**
-
-| Token | Meaning |
-|---|---|
-| `*` | any sequence of characters (incl. empty) |
-| `?` | any single character |
-| any other | literal — regex metacharacters (`.`, `+`, `(`, `)`, `[`, `]`, `{`, `}`, `^`, `$`, `\`, `\|`) are escaped |
-
-Patterns are anchored — `wheel*` matches `wheel_left` but not `front_wheel_left`.
-
-**Auto-include of parents:** when a matched frame's parent does not match the filter, the parent is auto-included so the bridged TF tree stays connected. Each auto-inclusion logs:
-
-- one-time `INFO` per frame (`Frame 'X' is parent of a bridged frame; auto-included`),
-- a debounced `WARN` summary 3 s after the auto-include set stops growing, listing all auto-included frames so you can extend `frame_filters` to silence the warning.
-
-**Example:** filter `['wheel*']` against a robot publishing `odom→base_link` (dynamic) and `base_link→wheel_*` (static) bridges every wheel transform plus auto-includes `base_link` and `odom` so RViz can resolve `world → wheel_*`.
-
-**Empty patterns are silently skipped.** `[""]`, `["", "", ""]`, etc. all collapse to no patterns and disable filtering (pure pass-through, zero regex overhead). This makes `[""]` an idiomatic "no filter" sentinel.
-
-**Important — `frame_filters: []` (bare empty list) in a YAML params file is rejected by rclcpp**, with the error `parameter_value_from failed for parameter 'frame_filters': No parameter value set`. This is an `rclcpp` YAML-loader limitation: it cannot infer the element type of an empty sequence and stores it as `PARAMETER_NOT_SET`. The throw originates inside `rclcpp::Node`'s constructor, before our code runs, so it cannot be caught and worked around. Use `frame_filters: [""]` (empty string sentinel) or `frame_filters: ["*"]` (regex matching everything) — both are equivalent to no filter from the bridge's perspective. The integration tests `EmptyArrayInYamlIsRejectedByRclcpp` document this contract.
-
-**Launch defaults:** both launch files default `frame_filters` to `"['']"`. The launch arg is parsed as YAML (`type: yaml`), so override it with the same form:
+`frame_filters` is a glob whitelist on `child_frame_id` (`*` = any chars, `?` = one char). A matched frame's parent is auto-included if missing, so the bridged tree stays connected — check the logs for `auto-included` warnings if you want to tighten the filter.
 
 ```bash
 ros2 launch tf_namespace_bridge tf_namespace_bridge.yaml \
   namespace:=robot1 frame_filters:="['odom', 'base_link', 'wheel*']"
-
-ros2 launch tf_namespace_bridge multi_tf_namespace_bridge.yaml \
-  namespaces:="['robot1', 'robot2']" frame_filters:="['wheel*']"
 ```
 
-An empty list `[]` default is not used because launch YAML cannot type-tag empty array overrides — rclcpp would reject it. When using `ros2 run` directly, simply omit the `-p frame_filters:=...` flag and the schema's empty-list default takes effect.
+**Gotcha:** a bare empty list (`frame_filters: []`) in a YAML params file is rejected by `rclcpp` — use `[""]` or `["*"]` instead. Full syntax and rationale: [docs/specification.md §6](docs/specification.md#6-frame-filtering).
+
+---
+
+## Debug
+
+```bash
+ros2 topic echo /tf
+ros2 topic echo /tf_static --qos-durability transient_local
+ros2 topic info /tf --verbose             # shows pub/sub QoS
+ros2 param list /multi_tf_namespace_bridge
+```
