@@ -240,6 +240,28 @@ TEST_F(TfNamespaceBridgeTest, RootNamespaceThrowsToPreventFeedbackLoop) {
   EXPECT_THROW(SetUpWithNamespace(""), std::invalid_argument);
 }
 
+TEST_F(TfNamespaceBridgeTest, RemapCollisionThrowsToPreventFeedbackLoop) {
+  // Regression for a production incident: a bringup-wide
+  // "set_remap: from: /tf to: tf" (meant for robot_state_publisher/ekf_node/
+  // controller_manager) also applied to this node, folding its absolute
+  // "/tf" publisher onto the same resolved topic as its "tf" subscriber
+  // (/robot1/tf). The namespace is non-root, so the existing guard misses
+  // this — only comparing the post-remap resolved topic names catches it.
+  // Unguarded, this ran for ~2 hours on hardware and reached >5 GB RSS.
+  rclcpp::NodeOptions opts;
+  opts.arguments({"--ros-args", "-r", "__ns:=/robot1", "-r", "/tf:=tf"});
+  EXPECT_THROW(std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts),
+               std::invalid_argument);
+}
+
+TEST_F(TfNamespaceBridgeTest, StaticRemapCollisionThrowsToPreventFeedbackLoop) {
+  // Same failure mode as above, for the /tf_static side.
+  rclcpp::NodeOptions opts;
+  opts.arguments({"--ros-args", "-r", "__ns:=/robot1", "-r", "/tf_static:=tf_static"});
+  EXPECT_THROW(std::make_shared<tf_namespace_bridge::TfNamespaceBridge>(opts),
+               std::invalid_argument);
+}
+
 // --- YAML params-file scenarios for empty / sentinel filters ---
 //
 // These tests document how rclcpp's --params-file YAML loader behaves for

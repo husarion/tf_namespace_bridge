@@ -40,6 +40,10 @@ class TfNamespaceBridge : public rclcpp::Node {
   void OnTfStatic(const tf2_msgs::msg::TFMessage::SharedPtr msg);
   // Shared filter + auto-include-logging step for both /tf and /tf_static.
   FrameFilter::ApplyResult ApplyAndLog(const tf2_msgs::msg::TFMessage& msg);
+  // Throws if a publisher and its counterpart subscriber resolved (post-remap)
+  // to the same topic — see ThrowIfPublisherLoopsBackToSubscriber in the .cpp
+  // for why the namespace check alone is not enough.
+  void CheckNoRemapFeedbackLoop() const;
   // (Re)create the /tf_static subscription. Used at startup and by the
   // reception watchdog to force a fresh transient_local query.
   void SubscribeStatic();

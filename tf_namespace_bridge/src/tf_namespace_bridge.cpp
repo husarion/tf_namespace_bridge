@@ -94,6 +94,8 @@ TfNamespaceBridge::TfNamespaceBridge(const rclcpp::NodeOptions& options)
 
   SubscribeStatic();
 
+  CheckNoRemapFeedbackLoop();
+
   param_poll_timer_ = create_wall_timer(kParamPollPeriod, [this]() { OnParamPoll(); });
   summary_timer_ = create_wall_timer(kSummaryPollPeriod, [this]() { OnSummaryPoll(); });
   static_watchdog_timer_ =
@@ -104,6 +106,39 @@ void TfNamespaceBridge::SubscribeStatic() {
   tf_static_sub_ = create_subscription<tf2_msgs::msg::TFMessage>(
       "tf_static", kTfStaticSubQos,
       [this](const tf2_msgs::msg::TFMessage::SharedPtr msg) { OnTfStatic(msg); });
+}
+
+void TfNamespaceBridge::CheckNoRemapFeedbackLoop() const {
+  // The root-namespace guard above only catches ONE way to create a /tf
+  // feedback loop. A launch-level remap can create the exact same loop even
+  // with a proper namespace: this happened in production when a bringup-wide
+  // "set_remap: from: /tf to: tf" (meant for robot_state_publisher/ekf_node/
+  // controller_manager) also caught this node, folding its absolute "/tf"
+  // publisher onto the same resolved topic as its "tf" subscriber. With
+  // frame_filters left at the default pass-through, the node then
+  // republished its own already-prefixed output forever, unbounded, which
+  // manifested on hardware as ~93% sustained CPU and >5 GB resident memory
+  // within ~2 hours. get_topic_name() reports the post-remap resolved name,
+  // so comparing it is the only way to catch this regardless of which
+  // enclosing launch file introduced the remap.
+  if (std::string(tf_pub_->get_topic_name()) == std::string(tf_sub_->get_topic_name())) {
+    throw std::invalid_argument(
+        "tf_namespace_bridge: publisher and subscriber both resolve to topic '" +
+        std::string(tf_pub_->get_topic_name()) +
+        "' after remapping. This creates a /tf feedback loop (the node would "
+        "republish its own output forever). Check for a blanket '/tf' remap "
+        "applied to this node by an enclosing launch file/group and exclude "
+        "tf_namespace_bridge from it.");
+  }
+  if (std::string(tf_static_pub_->get_topic_name()) ==
+      std::string(tf_static_sub_->get_topic_name())) {
+    throw std::invalid_argument(
+        "tf_namespace_bridge: publisher and subscriber both resolve to topic '" +
+        std::string(tf_static_pub_->get_topic_name()) +
+        "' after remapping. This creates a /tf_static feedback loop. Check for a "
+        "blanket '/tf_static' remap applied to this node by an enclosing launch "
+        "file/group and exclude tf_namespace_bridge from it.");
+  }
 }
 
 void TfNamespaceBridge::OnStaticWatchdog() {
